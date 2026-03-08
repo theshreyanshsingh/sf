@@ -1,0 +1,33 @@
+name: superblocks
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull Latest Code
+        uses: actions/checkout@v3
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /root/superblocks
+            git pull https://x-access-token:${{ secrets.GH_PAT }}@github.com/superblocks/superblocks.git
+            npm install
+            npm run build
+            pm2 stop superblocks
+            pm2 restart superblocks
