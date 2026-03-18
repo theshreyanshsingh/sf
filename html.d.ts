@@ -1,0 +1,4 @@
+declare module "*.html" {
+  const raw: string;
+  export default raw;
+} 

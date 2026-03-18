@@ -1,0 +1,2331 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>GrapesJS Editor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://unpkg.com/grapesjs/dist/css/grapes.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/grapesjs"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script type="module" src="/scripts/loader.js"></script>
+    <style>
+        :root {
+            --theme-bg: transparent;
+            --theme-panel-bg: #1A1A1A;
+            --theme-text-primary: #eaeaea;
+            --theme-text-secondary: #a0a0a0;
+            --theme-border: #3a3a4a;
+            --theme-accent: #ffffff;
+            --theme-input-bg: #1e1e2a;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body, html {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--theme-bg);
+            color: var(--theme-text-primary);
+            overflow: hidden;
+        }
+
+        #editor-container {
+            display: flex;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+        }
+
+        #left-panel, #right-panel {
+            background-color: var(--theme-panel-bg);
+            color: var(--theme-text-primary);
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 2;
+        }
+
+        #left-panel {
+            width: 250px;
+            box-shadow: 2px 0 8px rgba(0,0,0,0.3);
+            border-right: 1px solid var(--theme-border);
+        }
+
+        #right-panel {
+            width: 300px;
+        }
+
+        #main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+
+        #top-bar {
+            background-color: var(--theme-panel-bg);
+            color: white;
+            padding: 0 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--theme-bg);
+            height: 48px;
+            min-height: 48px;
+            flex-shrink: 0;
+        }
+
+        .top-bar-section {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+        .top-bar-section.buttons-row {
+            flex-grow: 0;
+        }
+
+        #top-bar-center {
+            justify-content: center;
+            flex-grow: 1;
+            overflow: hidden;
+        }
+
+        #top-bar-right {
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .gjs-pn-btn {
+            background: none;
+            border: none;
+            color: var(--theme-text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            padding: 0 12px;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            border-radius: 4px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .gjs-pn-btn:hover {
+            background-color: rgba(255,255,255,0.05);
+            color: var(--theme-text-primary);
+        }
+
+        .gjs-pn-btn.gjs-pn-active {
+            color: var(--theme-text-primary);
+        }
+        
+        .gjs-pn-btn.purple-button {
+            background-color: #805AD5; /* Purple */
+            color: white;
+            font-size: 20px;
+            width: 36px;
+            height: 36px;
+            justify-content: center;
+            border-radius: 6px;
+        }
+
+        .gjs-pn-btn.first-in-group {
+            margin-left: 12px;
+        }
+        
+        /* Device (Desktop/Mobile) selector button */
+        .gjs-pn-btn.device-button {
+            background-color: rgba(255, 255, 255, 0.06);
+            color: var(--theme-text-primary);
+            border: 1px solid var(--theme-border);
+            font-size: 13px;
+            padding: 6px 18px;
+            border-radius: 6px;
+            gap: 6px;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .gjs-pn-btn.device-button:hover,
+        .gjs-pn-btn.device-button.gjs-pn-active {
+            background-color: rgba(255, 255, 255, 0.15);
+        }
+        
+        #devices-c {
+            position: absolute;
+            background-color: var(--theme-panel-bg);
+            border: 1px solid var(--theme-border);
+            border-radius: 6px;
+            padding: 5px;
+            z-index: 10;
+        }
+
+        #devices-c .gjs-pn-btn {
+            height: auto;
+            padding: 6px 10px;
+            border: 1px solid var(--theme-border);
+            border-radius: 6px;
+            width: 100%;
+            justify-content: flex-start;
+        }
+        
+        .gjs-pn-options .gjs-pn-btn {
+            width: 36px;
+            justify-content: center;
+        }
+        
+        .gjs-pn-views .gjs-pn-btn {
+            height: 100%;
+            padding: 0 15px;
+            border-bottom: 2px solid transparent;
+            border-radius: 0;
+        }
+        
+        .gjs-pn-views .gjs-pn-btn.gjs-pn-active {
+             background-color: transparent;
+             color: var(--theme-text-primary);
+             border-bottom-color: var(--theme-accent);
+             box-shadow: none;
+        }
+
+        #gjs {
+            flex: 1 1 0%; /* grow, shrink, basis */
+            width: 100%;
+            min-width: 0;
+            min-height: 0;
+            border: none;
+            background-color: transparent; /* inherit body bg */
+            overflow: auto;
+        }
+
+        /* Ensure the GrapesJS canvas takes the full viewport width */
+        #gjs .gjs-cv-canvas,
+        #gjs iframe {
+            background: transparent !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+
+        .panel-section {
+            padding: 0;
+            border-bottom: 1px solid var(--theme-border);
+            overflow: hidden;
+            background-color: var(--theme-panel-bg);
+        }
+        
+        .panel-section:last-child {
+            border-bottom: none;
+        }
+        
+        .panel-title {
+            font-weight: 600;
+            padding-bottom: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            white-space: nowrap;
+            color: var(--theme-text-primary);
+        }
+
+        .layers-container, .styles-container, .blocks-container {
+            flex-grow: 1;
+            width: 100%;
+            overflow: auto;
+            min-height: 0;
+        }
+
+        .gjs-pn-commands {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            flex-wrap: wrap;
+        }
+
+        /* Tab styles */
+        .tabs {
+            display: flex;
+            background-color: var(--theme-panel-bg);
+            flex-shrink: 0;
+        }
+        .tab-button {
+            background-color: inherit;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            padding: 10px 15px;
+            transition: 0.3s;
+            color: var(--theme-text-primary);
+            border-bottom: 2px solid transparent;
+            white-space: nowrap;
+            flex: 1;
+            min-width: 0;
+            font-size: 12px;
+        }
+        .tab-button:hover {
+            border-bottom: 2px solid #555;
+        }
+        .tab-button.active {
+            border-bottom: 2px solid var(--theme-accent);
+        }
+        .tab-content {
+            padding: 10px;
+            overflow: auto;
+            flex-grow: 1;
+            min-height: 0;
+        }
+
+        /* Left Panel Styles */
+        .panel-title-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            flex-shrink: 0;
+            border-bottom: 1px solid var(--theme-border);
+            background-color: rgba(255,255,255,0.02);
+        }
+        .panel-title-icons i {
+            margin-left: 10px;
+            cursor: pointer;
+            color: var(--theme-text-secondary);
+            transition: color 0.2s ease;
+        }
+        .panel-title-icons i:hover {
+            color: var(--theme-text-primary);
+        }
+        .pages-list {
+            padding: 10px;
+            overflow: visible;
+            flex-grow: 1;
+            min-height: 0;
+        }
+        .page-item {
+            padding: 12px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            gap: 8px;
+            margin-bottom: 4px;
+            border: 1px solid transparent;
+            transition: all 0.2s ease;
+            background-color: rgba(255,255,255,0.02);
+            position: relative; /* Allow absolute-positioned menu */
+        }
+        .page-item:hover {
+            background-color: rgba(255,255,255,0.08);
+            border-color: var(--theme-border);
+        }
+        .page-item.active {
+            background-color: rgba(255, 255, 255, 0.15);
+            border-color: var(--theme-accent);
+            color: var(--theme-accent);
+        }
+        .page-item i {
+            opacity: 0;
+            color: var(--theme-text-secondary);
+            transition: opacity 0.2s ease;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 3px;
+        }
+        .page-item i:hover {
+            background-color: rgba(255,255,255,0.1);
+            color: var(--theme-text-primary);
+        }
+        .page-item.active i, .page-item:hover i {
+            opacity: 1;
+        }
+        .page-item > span {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-width: 0;
+            font-weight: 500;
+        }
+        .page-item > i {
+            flex-shrink: 0;
+        }
+        .layers-section .panel-title-container {
+            border-bottom: 1px solid var(--theme-border);
+        }
+
+        /* GrapesJS UI Overrides */
+        .gjs-one-bg { background-color: var(--theme-bg); }
+        .gjs-two-color { color: var(--theme-text-primary); }
+        .gjs-pn-panel { background-color: var(--theme-panel-bg); }
+        
+        .selectors-container, .styles-container, .traits-container { 
+            padding: 0; 
+            overflow: auto;
+            min-height: 0;
+        }
+
+        .gjs-sm-sector {
+            background-color: transparent;
+            border: none;
+            margin-bottom: 0;
+            border-bottom: 1px solid var(--theme-border);
+        }
+        .gjs-sm-title {
+            background-color: transparent;
+            padding: 15px 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 12px;
+        }
+        .gjs-sm-caret {
+            color: var(--theme-text-secondary);
+        }
+        .gjs-sm-properties {
+            background-color: transparent;
+            padding: 10px;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        .gjs-sm-property {
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .gjs-sm-label {
+            color: var(--theme-text-primary);
+            width: auto;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .gjs-field,
+        .gjs-sm-property .gjs-field {
+            width: 100%;
+        }
+        .gjs-input-holder input, .gjs-select select, .gjs-field-composite input, .gjs-field-composite select {
+            background-color: var(--theme-input-bg);
+            border: 1px solid var(--theme-border);
+            color: var(--theme-text-primary);
+            width: 100%;
+            padding: 8px;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 12px;
+            transition: border-color 0.2s;
+        }
+        .gjs-input-holder input:focus,
+        .gjs-select select:focus,
+        .gjs-field-composite input:focus,
+        .gjs-field-composite select:focus {
+            outline: none;
+            border-color: var(--theme-accent);
+        }
+        .gjs-field-composite .gjs-input-group {
+             border: 1px solid var(--theme-border);
+             border-radius: 6px;
+             display: flex;
+             align-items: center;
+             background-color: var(--theme-input-bg);
+             overflow: hidden;
+        }
+        .gjs-field-composite .gjs-input-group__input {
+            border: none;
+            flex-grow: 1;
+            min-width: 0;
+            display: flex;
+        }
+
+        .gjs-field-composite .gjs-input-group__input input {
+            flex-grow: 1;
+            min-width: 0;
+        }
+
+        .gjs-field-composite .gjs-field-units {
+            flex-shrink: 0;
+        }
+        
+        .gjs-field-composite input,
+        .gjs-field-composite select {
+            border: none !important;
+            background-color: transparent !important;
+            box-shadow: none !important;
+            padding: 8px; /* Maintain padding inside */
+        }
+        
+        .gjs-field-composite select {
+            padding-right: 20px; /* Space for dropdown arrow */
+        }
+        
+        .gjs-layer-container {
+            flex-grow: 1;
+            overflow: auto;
+        }
+        .gjs-clm-tags, .gjs-sm-properties {
+            border-bottom: 0;
+            padding: 10px;
+            margin-bottom: 0;
+        }
+        .gjs-clm-header, .gjs-clm-add-tag {
+            padding: 10px;
+            font-size: 12px;
+        }
+        .gjs-clm-tag {
+            background-color: rgba(236, 72, 153, 0.2);
+            color: #f9a8d4;
+            border: 1px solid rgba(236, 72, 153, 0.5);
+        }
+        .gjs-clm-sel-state {
+            background-color: var(--theme-input-bg);
+            border: 1px solid var(--theme-border);
+            color: var(--theme-text-primary);
+        }
+        .gjs-sm-property.gjs-sm-property--full {
+            width: 100%;
+            grid-column: 1 / -1;
+        }
+        .gjs-sm-property.gjs-sm-property--full .gjs-field {
+            width: 100%;
+        }
+
+        /* Layer Manager specific styles */
+        .layers-container {
+            padding: 5px;
+            overflow: auto;
+        }
+        .gjs-layer {
+            padding: 6px 4px;
+            border-radius: 4px;
+            margin-bottom: 1px;
+            transition: background-color 0.15s;
+            cursor: pointer;
+        }
+        .gjs-layer:hover {
+            background-color: rgba(255,255,255,0.05);
+        }
+        .gjs-layer-name {
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .gjs-layer-name .fa,
+        .gjs-layer-name .fa-solid,
+        .gjs-layer-name .fa-regular {
+            color: var(--theme-text-secondary);
+            width: 14px;
+            text-align: center;
+        }
+        .gjs-layer.gjs-selected, .gjs-layer.gjs-selected .gjs-layer-name, .gjs-layer.gjs-selected .gjs-layer-caret {
+            color: var(--theme-text-primary) !important;
+        }
+        .gjs-layer-caret {
+            width: 12px;
+        }
+        .gjs-layer-vis, .gjs-layer-move, .gjs-layer-count {
+            color: var(--theme-text-secondary);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1400px) {
+            #left-panel {
+                width: 220px;
+                min-width: 200px;
+            }
+            #right-panel {
+                width: 280px;
+                min-width: 250px;
+            }
+        }
+
+        @media (max-width: 1200px) {
+            #left-panel {
+                width: 200px;
+                min-width: 180px;
+            }
+            #right-panel {
+                width: 250px;
+                min-width: 220px;
+            }
+            
+            .gjs-pn-btn {
+                padding: 0 10px;
+                font-size: 11px;
+                min-width: 32px;
+            }
+            
+            .gjs-pn-btn.purple-button {
+                width: 34px;
+                height: 34px;
+                font-size: 18px;
+                min-width: 34px;
+            }
+        }
+
+        @media (max-width: 1024px) {
+            #left-panel {
+                width: 180px;
+                min-width: 160px;
+            }
+            #right-panel {
+                width: 220px;
+                min-width: 200px;
+            }
+            
+            .top-bar-section {
+                gap: 6px;
+            }
+            
+            .gjs-pn-btn {
+                padding: 0 8px;
+                font-size: 11px;
+                min-width: 30px;
+            }
+            
+            .gjs-pn-btn.purple-button {
+                width: 32px;
+                height: 32px;
+                font-size: 16px;
+                min-width: 32px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            #editor-container {
+                flex-direction: column;
+            }
+            
+            #left-panel, #right-panel {
+                width: 100%;
+                height: auto;
+                max-height: 250px;
+                min-width: 100%;
+            }
+            
+            #left-panel {
+                order: 1;
+            }
+            
+            #main-content {
+                order: 2;
+                flex: 1;
+                min-height: 300px;
+            }
+            
+            #right-panel {
+                order: 3;
+            }
+            
+            .top-bar-section {
+                gap: 4px;
+                flex-wrap: wrap;
+            }
+            
+            .gjs-pn-btn {
+                padding: 0 8px;
+                font-size: 12px;
+                min-width: 28px;
+                height: 40px;
+            }
+            
+            .gjs-pn-btn.purple-button {
+                width: 36px;
+                height: 36px;
+                font-size: 18px;
+                min-width: 36px;
+            }
+            
+            .tab-button {
+                padding: 12px 16px;
+                font-size: 13px;
+                min-width: 80px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            #top-bar {
+                padding: 0 8px;
+                height: 52px;
+                min-height: 52px;
+            }
+            
+            .top-bar-section {
+                gap: 3px;
+            }
+            
+            .gjs-pn-btn {
+                padding: 0 6px;
+                font-size: 11px;
+                min-width: 26px;
+                height: 38px;
+            }
+            
+            .gjs-pn-btn.purple-button {
+                width: 34px;
+                height: 34px;
+                font-size: 16px;
+                min-width: 34px;
+            }
+            
+            .tab-button {
+                padding: 10px 12px;
+                font-size: 12px;
+                min-width: 70px;
+            }
+            
+            #left-panel, #right-panel {
+                max-height: 200px;
+            }
+        }
+
+        @media (max-width: 360px) {
+            #top-bar {
+                padding: 0 5px;
+                height: 56px;
+                min-height: 56px;
+            }
+            
+            .gjs-pn-btn {
+                padding: 0 5px;
+                font-size: 10px;
+                min-width: 24px;
+                height: 42px;
+            }
+            
+            .gjs-pn-btn.purple-button {
+                width: 32px;
+                height: 32px;
+                font-size: 14px;
+                min-width: 32px;
+            }
+            
+            .tab-button {
+                padding: 8px 10px;
+                font-size: 11px;
+                min-width: 60px;
+            }
+        }
+
+        /* Hide panels on very small screens */
+        @media (max-width: 320px) {
+            #left-panel, #right-panel {
+                display: none;
+            }
+            
+            #main-content {
+                width: 100%;
+            }
+        }
+
+        /* Right Panel - All text to text-xs */
+        #right-panel, #right-panel * {
+            font-size: 12px !important;
+        }
+
+        /* Override for specific elements that might need different sizes */
+        #right-panel .gjs-pn-btn {
+            font-size: 12px !important;
+        }
+
+        #right-panel .gjs-sm-title {
+            font-size: 12px !important;
+        }
+
+        #right-panel .gjs-sm-label {
+            font-size: 12px !important;
+        }
+
+        #right-panel .gjs-clm-header, #right-panel .gjs-clm-add-tag {
+            font-size: 12px !important;
+        }
+
+        #right-panel .gjs-input-holder input, 
+        #right-panel .gjs-select select, 
+        #right-panel .gjs-field-composite input, 
+        #right-panel .gjs-field-composite select {
+            font-size: 12px !important;
+        }
+
+        /* Blocks Manager specific styles */
+        .gjs-block-category {
+            margin: 0 0 4px 0; /* Align spacing with .page-item */
+            border-bottom: none; /* Remove old divider */
+        }
+        .gjs-block-category__label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px; /* Match .page-item padding */
+            cursor: pointer;
+            background-color: rgba(255,255,255,0.02); /* Consistent sidebar bg */
+            color: var(--theme-text-primary);
+            font-size: 10px !important; /* Smaller heading */
+            font-weight: 500;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+            line-height: 1.2em;
+        }
+        .gjs-block-category__label:hover {
+            background-color: rgba(255,255,255,0.08);
+            border-color: var(--theme-border);
+        }
+        .gjs-block-category__label::after {
+            content: "\\f054"; /* Font Awesome > */
+            font-family: 'Font Awesome 6 Free', 'Font Awesome 6 Solid';
+            font-weight: 900;
+            transition: transform 0.2s ease-in-out;
+            font-size: 10px;
+            color: var(--theme-text-secondary);
+        }
+        .gjs-block-category.gjs-open > .gjs-block-category__label {
+            background-color: rgba(255, 255, 255, 0.15);
+            border-color: var(--theme-accent);
+            color: var(--theme-accent);
+        }
+        .gjs-block-category.gjs-open > .gjs-block-category__label::after {
+            transform: rotate(90deg);
+        }
+        .gjs-block-category.gjs-open > .gjs-blocks-c {
+            display: grid;
+        }
+        .blocks-container {
+            padding: 10px; /* Align with .pages-list */
+            overflow-y: auto;
+            max-height: 45vh;
+        }
+        .gjs-blocks-c {
+            display: none; /* Hidden by default */
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            padding: 12px 15px; /* Align inner padding */
+            background-color: var(--theme-panel-bg);
+        }
+        .gjs-block {
+            width: auto;
+            min-height: 60px;
+            height: auto;
+            margin: 0;
+            border: 1px solid var(--theme-border);
+            border-radius: 6px;
+            background-color: var(--theme-input-bg);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            color: var(--theme-text-secondary);
+            font-size: 11px;
+            padding: 10px 5px;
+        }
+        .gjs-block:hover {
+            background-color: var(--theme-panel-bg);
+            border-color: var(--theme-accent);
+            color: var(--theme-accent);
+        }
+        .gjs-block-label {
+            font-size: 11px;
+        }
+
+        /* Add CSS for the inline device <select> */
+        .device-select {
+            background-color: transparent;
+            color: var(--theme-text-primary);
+            border: 1px solid var(--theme-border);
+            border-radius: 6px;
+            padding: 4px 26px 4px 10px;
+            font-size: 12px;
+            appearance: none;
+            -webkit-appearance: none;
+            position: relative;
+        }
+
+        /* Add a custom chevron using a background SVG */
+        .device-select {
+            background-image: url("data:image/svg+xml,%3Csvg fill='gray' height='10' viewBox='0 0 320 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M96 207l128 128 128-128'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            background-size: 8px 8px;
+        }
+
+        #top-bar-center { position: relative; }
+
+        /* Selection Panel Styles */
+        .selection-panel {
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--theme-border);
+        }
+
+        .selection-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .selection-title {
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--theme-text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .selection-state-select {
+            background-color: var(--theme-input-bg);
+            border: 1px solid var(--theme-border);
+            color: var(--theme-text-primary);
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 12px;
+            -webkit-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23a0a0a0' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+            background-position: right 0.5rem center;
+            background-repeat: no-repeat;
+            background-size: 1.25em;
+            padding-right: 2rem;
+        }
+
+        .selection-class-manager {
+            position: relative;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            background-color: var(--theme-input-bg);
+            border: 1px solid var(--theme-border);
+            border-radius: 6px;
+        }
+
+        .selection-class-icon {
+            color: var(--theme-text-secondary);
+            padding: 0 10px;
+        }
+
+        .selection-class-input {
+            background-color: transparent;
+            border: none;
+            color: var(--theme-text-primary);
+            padding: 8px 0px;
+            width: 100%;
+            font-size: 12px;
+            outline: none;
+        }
+        
+        .selection-class-input::placeholder {
+            color: var(--theme-text-secondary);
+        }
+
+        .selection-add-class-btn {
+            background: transparent;
+            border: none;
+            color: var(--theme-text-primary);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0px 8px;
+            border-left: 1px solid var(--theme-border);
+            align-self: stretch;
+            display: flex;
+            align-items: center;
+        }
+
+        .selection-component-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .selection-component-identifier,
+        .selection-component-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .selection-component-icon {
+            background-color: #6B46C1; /* A nice purple */
+            color: white;
+            border: none;
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .selection-component-tag {
+            background-color: #2B6CB0; /* A nice blue */
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .selection-action-btn {
+            background-color: var(--theme-input-bg);
+            border: 1px solid transparent;
+            color: var(--theme-text-secondary);
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .selection-action-btn:hover {
+            border-color: var(--theme-border);
+            color: var(--theme-text-primary);
+        }
+
+        /* More specific styling for size inputs */
+        .gjs-sm-property--width .gjs-input-group,
+        .gjs-sm-property--height .gjs-input-group,
+        .gjs-sm-property--min-width .gjs-input-group,
+        .gjs-sm-property--max-width .gjs-input-group,
+        .gjs-sm-property--min-height .gjs-input-group,
+        .gjs-sm-property--max-height .gjs-input-group {
+            position: relative;
+            padding-left: 22px; /* For icon */
+        }
+
+        .gjs-sm-property--width .gjs-input-group::before,
+        .gjs-sm-property--height .gjs-input-group::before,
+        .gjs-sm-property--min-width .gjs-input-group::before,
+        .gjs-sm-property--max-width .gjs-input-group::before,
+        .gjs-sm-property--min-height .gjs-input-group::before,
+        .gjs-sm-property--max-height .gjs-input-group::before {
+            content: '\\2195';
+            font-family: Arial, sans-serif;
+            position: absolute;
+            left: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--theme-text-secondary);
+            font-size: 14px;
+            pointer-events: none;
+        }
+
+        .gjs-sm-property--width .gjs-field-units select,
+        .gjs-sm-property--height .gjs-field-units select,
+        .gjs-sm-property--min-width .gjs-field-units select,
+        .gjs-sm-property--max-width .gjs-field-units select,
+        .gjs-sm-property--min-height .gjs-field-units select,
+        .gjs-sm-property--max-height .gjs-field-units select {
+            -webkit-appearance: none;
+            appearance: none;
+            background-image: none;
+            text-align: right;
+            padding-right: 8px;
+            color: var(--theme-text-secondary);
+        }
+
+        /* Dropdown menu for page options */
+        .page-options-menu {
+            position: absolute;
+            top: calc(100% + 4px);
+            right: 0;
+            background-color: var(--theme-panel-bg);
+            border: 1px solid var(--theme-border);
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            min-width: 120px;
+            z-index: 9999; /* Ensure menu is above other UI */
+        }
+        .page-option {
+            padding: 8px 12px;
+            font-size: 12px;
+            color: var(--theme-text-secondary);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .page-option:hover {
+            background-color: rgba(255,255,255,0.08);
+            color: var(--theme-text-primary);
+        }
+
+        .panel-section.pages-section {
+            overflow: visible; /* Allow dropdown menus to escape */
+        }
+
+        /* Quick Change Bar */
+        #quick-change-bar {
+            position: absolute;
+            z-index: 10000;
+            display: none;
+            background: rgba(0,0,0,0.85);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 9999px;
+            font-size: 14px;
+            line-height: 1;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+            align-items: center;
+        }
+
+        #quick-change-bar input {
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #fff;
+            width: 220px;
+            font-size: 14px;
+        }
+
+        #quick-change-bar button {
+            background: #2563eb;
+            border: none;
+            color: #fff;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            margin-left: 6px;
+            font-size: 14px;
+        }
+
+        #quick-change-bar button i {
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="editor-container">
+    <div id="left-panel">
+        <div class="panel-section pages-section">
+            <div class="panel-title-container">
+                <div class="panel-title">
+                    <i class="fa-solid fa-file-lines"></i>
+                    <span>Pages</span>
+                </div>
+                <div class="panel-title-icons">
+                    <i id="add-page-btn" class="fa-solid fa-plus"></i>
+                    <i id="toggle-pages-btn" class="fa-solid fa-chevron-up"></i>
+                </div>
+            </div>
+            <div class="pages-list">
+                <!-- Pages will be dynamically inserted here -->
+            </div>
+        </div>
+        <div class="panel-section blocks-section" style="display: flex; flex-direction: column;">
+            <div class="panel-title-container">
+                <div class="panel-title">
+                    <i class="fa-solid fa-cubes"></i>
+                    <span>Blocks</span>
+                </div>
+                <div class="panel-title-icons">
+                    <i id="toggle-blocks-btn" class="fa-solid fa-chevron-up"></i>
+                </div>
+            </div>
+            <div class="blocks-container" style="flex-grow: 1;"></div>
+        </div>
+        <div class="panel-section layers-section" style="display: flex; flex-direction: column;">
+            <div class="panel-title-container">
+                <div class="panel-title">
+                     <i class="fa-solid fa-layer-group"></i>
+                     <span>Layers</span>
+                </div>
+                <div class="panel-title-icons">
+                    <i id="toggle-layers-btn" class="fa-solid fa-chevron-up"></i>
+                </div>
+            </div>
+            <div class="layers-container" style="flex-grow: 1;"></div>
+        </div>
+    </div>
+    <div id="main-content">
+        <div id="top-bar">
+            <div id="top-bar-left" class="top-bar-section"></div>
+            <div id="top-bar-center" class="top-bar-section"></div>
+            <div id="top-bar-right" class="top-bar-section"></div>
+        </div>
+        <div id="gjs"></div>
+    </div>
+    <div id="right-panel">
+        <div class="tabs">
+            <button class="tab-button active" onclick="openTab(event, 'styles-tab')">Styles</button>
+            <button class="tab-button" onclick="openTab(event, 'properties-tab')">Properties</button>
+        </div>
+        <div id="styles-tab" class="tab-content">
+            <div class="selectors-container"></div>
+            <div class="styles-container"></div>
+        </div>
+        <div id="properties-tab" class="tab-content" style="display: none;">
+            <div class="traits-container"></div>
+        </div>
+    </div>
+</div>
+
+<script type="text/javascript">
+    function openTab(evt, tabName) {
+        var i, tabcontent, tablinks;
+        tabcontent = document.getElementsByClassName("tab-content");
+        for (i = 0; i < tabcontent.length; i++) {
+            tabcontent[i].style.display = "none";
+        }
+        tablinks = document.getElementsByClassName("tab-button");
+        for (i = 0; i < tablinks.length; i++) {
+            tablinks[i].className = tablinks[i].className.replace(" active", "");
+        }
+        document.getElementById(tabName).style.display = "block";
+        evt.currentTarget.className += " active";
+    }
+
+    const editor = grapesjs.init({
+        container: '#gjs',
+        fromElement: false,
+        height: '100%',
+        width: '100%',
+        storageManager: false,
+        pageManager: {
+            pages: [] // Users will add pages manually
+        },
+        panels: {
+            defaults: [
+                { 
+                    id: 'panel-left',
+                    el: '#top-bar-left',
+                    buttons: [
+                        { id: 'add-element', label: '<i class="fa-solid fa-plus"></i>', command: 'core:open-blocks', className: 'purple-button' },
+                    ],
+                },
+                {
+                    id: 'panel-center',
+                    el: '#top-bar-center',
+                    buttons: [] // Device selector will be a native <select> element injected later
+                },
+                {
+                    id: 'panel-right',
+                    el: '#top-bar-right',
+                    className: 'buttons-row',
+                    buttons: [
+                        { id: 'preview', label: '<i class="fa-regular fa-eye"></i>', command: 'core:preview' },
+                        { id: 'import', label: '<i class="fa-solid fa-file-import"></i>', command: 'import-html', className: 'first-in-group' },
+                        { id: 'export', label: '<i class="fa-solid fa-code"></i>', command: 'export-template', className: 'first-in-group' },
+                        { id: 'download', label: '<i class="fa-solid fa-download"></i>', command: 'download-html', className: 'first-in-group' },
+                        { id: 'delete', label: '<i class="fa-solid fa-trash"></i>', command: 'core:component-delete', className: 'first-in-group' },
+                        { id: 'save', label: '<i class="fa-solid fa-save"></i>', command: 'core:save' },
+                        { id: 'undo', label: '<i class="fa-solid fa-undo"></i>', command: 'core:undo', className: 'first-in-group' },
+                        { id: 'redo', label: '<i class="fa-solid fa-redo"></i>', command: 'core:redo' },
+                    ]
+                },
+            ]
+        },
+        deviceManager: {
+            devices: [
+                { name: 'Desktop', width: '' },
+                { name: 'Tablet', width: '768px', widthMedia: '992px' },
+                { name: 'Mobile', width: '320px', widthMedia: '480px' }
+            ]
+        },
+        layerManager: { appendTo: '.layers-container' },
+        selectorManager: { appendTo: '.selectors-container' },
+        traitManager: { appendTo: '.traits-container' },
+        styleManager: {
+            appendTo: '.styles-container',
+            sectors: [
+            { name: 'Layout', open: false, buildProps: ['display', 'flex-direction', 'justify-content', 'align-items', 'position', 'top', 'right', 'bottom', 'left'] },
+            { name: 'Size', open: true, buildProps: ['width', 'height', 'min-width', 'max-width', 'min-height', 'max-height'] },
+            { name: 'Space', open: true, buildProps: ['margin', 'padding'] },
+            { name: 'Typography', open: false, buildProps: ['font-family', 'font-size', 'font-weight', 'letter-spacing', 'color', 'line-height', 'text-align', 'text-decoration'] },
+            { name: 'Background', open: false, buildProps: ['background-color', 'background-image', 'background-repeat', 'background-position', 'background-attachment', 'background-size'] },
+            { name: 'Borders', open: false, buildProps: ['border-radius', 'border'] },
+            { name: 'Effects', open: false, buildProps: ['box-shadow', 'transform'] }
+            ]
+        },
+        canvas: {
+            styles: [
+                'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css'
+            ]
+        },
+        blockManager: {
+            appendTo: '.blocks-container',
+            /* blocks are dynamically injected from /components/block-manifest.json */
+        },
+    });
+
+    editor.Commands.add('show-styles', {
+        run(editor, sender) {
+            sender.set('active', true);
+            document.getElementById('styles-tab').style.display = 'block';
+            document.getElementById('properties-tab').style.display = 'none';
+        }
+    });
+
+    editor.Commands.add('show-properties', {
+        run(editor, sender) {
+            sender.set('active', true);
+            document.getElementById('styles-tab').style.display = 'none';
+            document.getElementById('properties-tab').style.display = 'block';
+        }
+    });
+    
+    editor.Commands.add('open-blocks', {
+        run(editor, sender) {
+            const blocksSection = document.querySelector('.blocks-section');
+            const layersSection = document.querySelector('.layers-section');
+            const button = document.querySelector('#toggle-panels i');
+            
+            if (blocksSection.style.display === 'none' || blocksSection.style.display === '') {
+                blocksSection.style.display = 'flex';
+                layersSection.style.display = 'none';
+                button.className = 'fa-solid fa-layer-group';
+            } else {
+                blocksSection.style.display = 'none';
+                layersSection.style.display = 'flex';
+                button.className = 'fa-solid fa-cubes';
+            }
+        }
+    });
+    
+    editor.Commands.add('toggle-left', {
+        run(editor, sender) {
+            const leftPanel = document.getElementById('left-panel');
+            leftPanel.style.display = leftPanel.style.display === 'none' ? 'flex' : 'none';
+        }
+    });
+
+    editor.Commands.add('toggle-devices', {
+        run(editor, sender) {
+            const devicesPanel = editor.Panels.getPanel('devices-c');
+            devicesPanel.set('visible', !devicesPanel.get('visible'));
+        }
+    });
+
+    const pageManager = editor.Pages;
+    const pagesListEl = document.querySelector('.pages-list');
+    const addPageBtn = document.getElementById('add-page-btn');
+
+    const renderPages = () => {
+        pagesListEl.innerHTML = '';
+        const pages = pageManager.getAll();
+        const selected = pageManager.getSelected();
+
+        pages.forEach(page => {
+            const pageItem = document.createElement('div');
+            pageItem.className = 'page-item';
+            if (selected && page.id === selected.id) {
+                pageItem.classList.add('active');
+            }
+            const displayName = page.getName() || 'Untitled';
+            pageItem.innerHTML = `<span>${displayName}</span><i class="fa-solid fa-ellipsis-vertical"></i>`;
+            pageItem.addEventListener('click', (e) => {
+                if (!e.target.matches('.fa-ellipsis-vertical')) {
+                    pageManager.select(page.id);
+                }
+            });
+
+            // Handle options menu
+            const optsIcon = pageItem.querySelector('.fa-ellipsis-vertical');
+            optsIcon.addEventListener('click', (e) => {
+                e.stopPropagation();
+                showPageOptions(pageItem, page);
+            });
+
+            pagesListEl.appendChild(pageItem);
+        });
+    };
+
+    const togglePagesBtn = document.getElementById('toggle-pages-btn');
+    const pagesList = document.querySelector('.pages-list');
+    let pagesSectionOpen = true;
+
+    togglePagesBtn.addEventListener('click', () => {
+        pagesSectionOpen = !pagesSectionOpen;
+        pagesList.style.display = pagesSectionOpen ? 'block' : 'none';
+        togglePagesBtn.className = pagesSectionOpen ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down';
+    });
+
+    const toggleBlocksBtn = document.getElementById('toggle-blocks-btn');
+    const blocksContainer = document.querySelector('.blocks-container');
+    let blocksSectionOpen = true;
+
+    toggleBlocksBtn.addEventListener('click', () => {
+        blocksSectionOpen = !blocksSectionOpen;
+        blocksContainer.style.display = blocksSectionOpen ? 'block' : 'none';
+        toggleBlocksBtn.className = blocksSectionOpen ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down';
+    });
+
+    const toggleLayersBtn = document.getElementById('toggle-layers-btn');
+    const layersContainer = document.querySelector('.layers-container');
+    let layersSectionOpen = true;
+
+    toggleLayersBtn.addEventListener('click', () => {
+        layersSectionOpen = !layersSectionOpen;
+        layersContainer.style.display = layersSectionOpen ? 'block' : 'none';
+        toggleLayersBtn.className = layersSectionOpen ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down';
+    });
+
+    editor.on('page:select page:add page:remove page:update', renderPages);
+
+    editor.on('component:add component:remove component:update', () => {
+        editor.trigger('change:canvasOffset');
+    });
+
+    editor.on('block-manager:render', () => {
+        const categories = editor.BlockManager.getCategories();
+        categories.each((category, index) => {
+            category.set('open', index === 0);
+        });
+    });
+
+    // Auto-assign names to dropped blocks for clearer layer labels
+    editor.on('block:drag:stop', (block) => {
+        const selected = editor.getSelected();
+        if (selected && !selected.get('name')) {
+            selected.set({ name: block.get('label') });
+        }
+    });
+
+    editor.on('load', () => {
+        const wrapper = editor.getWrapper();
+        if(wrapper) {
+            wrapper.set({
+                name: 'Body',
+                icon: '<i class="fa-regular fa-square"></i>'
+            });
+            // Ensure wrapper spans full width without margins
+            wrapper.setStyle({
+                width: '100%',
+                'max-width': '100%',
+                margin: '0',
+                padding: '0',
+            });
+        }
+        editor.trigger('change:canvasOffset');
+        injectDeviceSelect();
+
+        // Ensure the iframe canvas has no margin/padding once ready
+        editor.on('canvas:ready', () => {
+            const canvasDoc = editor.Canvas.getDocument();
+            if (!canvasDoc) return;
+            canvasDoc.documentElement.style.margin = '0';
+            canvasDoc.documentElement.style.padding = '0';
+            canvasDoc.body.style.margin = '0';
+            canvasDoc.body.style.padding = '0';
+
+            const styleTag = canvasDoc.createElement('style');
+            styleTag.textContent = `
+                html,body{margin:0;padding:0;width:100%;overflow-x:hidden;box-sizing:border-box;}
+                .gjs-cv-canvas{padding:0!important;border:none!important;box-shadow:none!important;width:100%!important;max-width:100%!important;}
+                .gjs-wrapper{width:100%!important;max-width:100%!important;margin:0!important;padding:0!important;box-sizing:border-box;}
+            `;
+            canvasDoc.head.appendChild(styleTag);
+        });
+
+        ensureBaseAssets();
+    });
+    
+    // Track last imported filename for save
+    let importedFileName = 'custom.html';
+
+    // Handle to the file picked via File System Access API
+    let fileHandle = null;
+
+    /* ---------------------------------------------------
+       Universal HTML loader → keeps <style>, <link>, <script>
+    ---------------------------------------------------*/
+    function loadHtmlIntoEditor(rawHtml) {
+        const parser = new DOMParser();
+        const parsed = parser.parseFromString(rawHtml, 'text/html');
+
+        // Collect data first ---------------------------------
+        const bodyContent  = parsed.body ? parsed.body.innerHTML : rawHtml;
+        // All original <style>, <link> and <script> nodes from the source document
+        const styleTags   = Array.from(parsed.querySelectorAll('style'));
+        const linkTags    = Array.from(parsed.querySelectorAll('link'));
+        const scriptTags  = Array.from(parsed.querySelectorAll('script')).filter(sc => {
+            // Skip scripts that explicitly load or use GrapesJS inside the imported page
+            const srcAttr   = (sc.getAttribute('src') || '').toLowerCase();
+            const innerTxt  = (sc.textContent || '').toLowerCase();
+            // If the script source or inline code mentions "grapesjs" we consider it not relevant
+            // for the in-canvas preview (GrapesJS already runs in the parent context)
+            if (srcAttr.includes('grapes') || innerTxt.includes('grapesjs')) {
+                return false; // filter out
+            }
+            return true;
+        });
+
+        // Inject assets into the canvas iframe BEFORE we mount components
+        const canvasDoc = editor.Canvas.getDocument();
+        if (!canvasDoc) return;
+        const head = canvasDoc.head;
+
+        // Track already injected external URLs / inline contents to avoid duplicates
+        const alreadyExternal = new Set();
+        head.querySelectorAll('link[href]').forEach(l => alreadyExternal.add(l.getAttribute('href')));
+        head.querySelectorAll('script[src]').forEach(s => alreadyExternal.add(s.getAttribute('src')));
+        const alreadyInlineStyle = new Set();
+        head.querySelectorAll('style').forEach(s => alreadyInlineStyle.add(s.textContent.trim()));
+
+        /* --- LINK TAGS (stylesheets, preconnect, etc.) --- */
+        linkTags.forEach(linkEl => {
+            const href = linkEl.getAttribute('href');
+            if (href && alreadyExternal.has(href)) return; // skip duplicates by href
+            const clone = canvasDoc.createElement('link');
+            Array.from(linkEl.attributes).forEach(attr => clone.setAttribute(attr.name, attr.value));
+            head.appendChild(clone);
+            if (href) alreadyExternal.add(href);
+        });
+
+        /* --- STYLE TAGS (inline) --- */
+        styleTags.forEach(styleEl => {
+            const cssText = styleEl.textContent.trim();
+            if (!cssText || alreadyInlineStyle.has(cssText)) return; // skip duplicates by content
+            const clone = canvasDoc.createElement('style');
+            Array.from(styleEl.attributes).forEach(attr => clone.setAttribute(attr.name, attr.value));
+            clone.textContent = cssText;
+            head.appendChild(clone);
+            alreadyInlineStyle.add(cssText);
+        });
+
+        /* --- SCRIPT TAGS --- */
+        scriptTags.forEach(scriptEl => {
+            const src = scriptEl.getAttribute('src');
+            if (src && alreadyExternal.has(src)) return; // skip duplicate external scripts
+            const clone = canvasDoc.createElement('script');
+            Array.from(scriptEl.attributes).forEach(attr => clone.setAttribute(attr.name, attr.value));
+            if (!src) clone.textContent = scriptEl.textContent;
+            head.appendChild(clone);
+            if (src) alreadyExternal.add(src);
+        });
+
+        // Finally, push markup into GrapesJS canvas. Use setComponents which already replaces
+        // existing components of the current page without globally clearing others.
+        editor.setComponents(bodyContent);
+    }
+
+    // Utility to load HTML from the root path (./custom.html) and inject into the editor
+    async function loadCustomFile() {
+        const path = '/custom.html';
+        try {
+            const res = await fetch(path);
+            if (!res.ok) return;
+            const rawHtml = await res.text();
+            loadHtmlIntoEditor(rawHtml);
+        } catch (err) {
+            console.error('Failed to load custom.html', err);
+        }
+    }
+
+    renderPages();
+    
+    const comps = editor.Components;
+    // Safely tweak built-in component defaults instead of redefining types
+    const tweakIcon = (type, iconHtml, extraDefaults={}) => {
+        const t = comps.getType(type);
+        if(t && t.model && t.model.prototype.defaults){
+            t.model.prototype.defaults = {
+                ...t.model.prototype.defaults,
+                icon: iconHtml,
+                ...extraDefaults
+            };
+        }
+    };
+    tweakIcon('default', '<i class="fa-solid fa-cube"></i>');
+    tweakIcon('text',    '<i class="fa-solid fa-t"></i>');
+    tweakIcon('image',   '<i class="fa-solid fa-image"></i>');
+    tweakIcon('link',    '<i class="fa-solid fa-link"></i>');
+    tweakIcon('text',    '<i class="fa-solid fa-heading"></i>', { tagName:'h1' }); // heading icon
+
+    /* Inject inline device selector */
+    function injectDeviceSelect() {
+        const targetEl = document.getElementById('top-bar-right');
+        if (!targetEl) return;
+        const select = document.createElement('select');
+        select.id = 'device-select';
+        select.className = 'device-select';
+        ['Desktop', 'Tablet', 'Mobile'].forEach(dev => {
+            const option = document.createElement('option');
+            option.value = dev;
+            option.textContent = dev;
+            select.appendChild(option);
+        });
+        select.value = editor.getDevice();
+        select.addEventListener('change', (e) => {
+            const val = e.target.value;
+            editor.setDevice(val);
+        });
+        targetEl.appendChild(select);
+
+        // --- Theme selector ---
+        const themeSel = document.createElement('select');
+        themeSel.className = 'device-select';
+        themeSel.style.marginLeft = '8px';
+        ['light','dark'].forEach(t => {
+            const o = document.createElement('option');
+            o.value = t;
+            o.textContent = t.charAt(0).toUpperCase() + t.slice(1);
+            themeSel.appendChild(o);
+        });
+        const savedTheme = localStorage.getItem('ds-theme') || 'light';
+        themeSel.value = savedTheme;
+
+        themeSel.addEventListener('change', e => {
+            const doc = editor.Canvas.getDocument();
+            const link = doc && doc.getElementById('theme');
+            if (link) link.href = `/design-system/tokens-${e.target.value}.css`;
+            localStorage.setItem('ds-theme', e.target.value);
+        });
+        targetEl.appendChild(themeSel);
+    }
+
+    // Add new pages from the Pages sidebar
+    addPageBtn.addEventListener('click', () => {
+        const newPageName = prompt('Enter new page name', 'Page ' + (pageManager.getAll().length + 1));
+        if (newPageName) {
+            pageManager.add({ name: newPageName, component: `<h1>${newPageName}</h1>` });
+        }
+    });
+
+    /* -------------------------------------
+       Import HTML File Command
+    -------------------------------------*/
+    editor.Commands.add('import-html', {
+        async run(editor) {
+            if (!window.showOpenFilePicker) {
+                alert('File System Access API not supported in this browser.');
+                return;
+            }
+
+            try {
+                const [handle] = await window.showOpenFilePicker({
+                    types: [{
+                        description: 'HTML Files',
+                        accept: { 'text/html': ['.html'] }
+                    }]
+                });
+
+                fileHandle = handle;
+                importedFileName = handle.name;
+
+                const file = await handle.getFile();
+                const rawHtml = await file.text();
+                loadHtmlIntoEditor(rawHtml);
+            } catch (err) {
+                console.error('File pick cancelled or failed', err);
+            }
+        }
+    });
+
+    /* ----------------------------------
+       Page options (rename / duplicate / delete)
+    ----------------------------------*/
+    function showPageOptions(container, page) {
+        // Remove any existing menu first
+        document.querySelectorAll('.page-options-menu').forEach(m => m.remove());
+
+        const menu = document.createElement('div');
+        menu.className = 'page-options-menu';
+        menu.innerHTML = `
+            <div class="page-option" data-action="rename">Rename</div>
+            <div class="page-option" data-action="duplicate">Duplicate</div>
+            <div class="page-option" data-action="delete">Delete</div>
+        `;
+
+        menu.addEventListener('click', (ev) => {
+            const actionEl = ev.target.closest('.page-option');
+            if (!actionEl) return;
+            const action = actionEl.dataset.action;
+            if (action === 'rename') {
+                const newName = prompt('Rename page', page.getName());
+                if (newName) {
+                    page.set('name', newName);
+                }
+            } else if (action === 'duplicate') {
+                const baseName = page.getName();
+                const duplicateName = baseName + ' Copy';
+                const htmlContent = page.getMainComponent().toHTML ? page.getMainComponent().toHTML() : '';
+                pageManager.add({ name: duplicateName, component: htmlContent });
+            } else if (action === 'delete') {
+                if (confirm(`Delete page "${page.getName()}"?`)) {
+                    const wasSelected = pageManager.getSelected() && pageManager.getSelected().id === page.id;
+                    pageManager.remove(page.id);
+                    if (wasSelected && pageManager.getAll().length) {
+                        pageManager.select(pageManager.getAll()[0].id);
+                    }
+                }
+            }
+            menu.remove();
+        });
+
+        // Close menu on outside click
+        document.addEventListener('click', function onDocClick(ev) {
+            if (!menu.contains(ev.target)) {
+                menu.remove();
+                document.removeEventListener('click', onDocClick);
+            }
+        });
+
+        container.appendChild(menu);
+    }
+
+    /* ----------------------------------
+       Save (Export to HTML) Command
+    ----------------------------------*/
+    editor.Commands.add('core:save', {
+        async run(editor) {
+            const html = editor.getHtml();
+            const css = editor.getCss();
+            const fullHtml = `<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<style>${css}</style>\n</head>\n<body>${html}</body>\n</html>`;
+
+            if (fileHandle) {
+                try {
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(fullHtml);
+                    await writable.close();
+                    alert('File saved successfully: ' + importedFileName);
+                } catch (err) {
+                    console.error('Error writing to file', err);
+                    alert('Failed to write to file.');
+                }
+                return;
+            }
+
+            // Fallback: download if no handle
+            const blob = new Blob([fullHtml], { type: 'text/html' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = importedFileName || 'page.html';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+        }
+    });
+
+    // --- AUTO LOAD unknown custom elements when added ---
+    editor.on('component:add', cmp => {
+        const tag = cmp.get('tagName');
+        if(!(tag && tag.includes('-'))) return;
+
+        // Add a small delay to ensure iframe is ready
+        setTimeout(() => {
+            const win = editor.Canvas.getWindow();
+            if(!win || !win.customElements) {
+                console.warn('Canvas window not ready for', tag);
+                return;
+            }
+            
+            if(win.customElements.get(tag)) return; // already defined
+
+            // Helper: retry until loader becomes available (canvas scripts may load async)
+            const maxRetries = 50; // 5 seconds
+            let tries = 0;
+            const tryLoad = () => {
+                const w = editor.Canvas.getWindow();
+                if(!w) return; // iframe not ready
+                
+                if(typeof w.ensureComponentLoaded === 'function') {
+                    console.log('Loading component:', tag);
+                    w.ensureComponentLoaded(tag).catch(err => {
+                        console.error('Failed to load component', tag, err);
+                    });
+                } else if(tries < maxRetries) {
+                    tries++;
+                    setTimeout(tryLoad, 100);
+                } else {
+                    console.warn('Loader not available for', tag, 'after', maxRetries * 100, 'ms');
+                }
+            };
+            tryLoad();
+        }, 100);
+    });
+
+    // Load block registry with better error handling
+    import('/scripts/block-registry.js')
+        .then(m => {
+            console.log('Block registry loaded, registering blocks...');
+            return m.registerBlocks(editor);
+        })
+        .then(() => console.log('Blocks registered successfully'))
+        .catch(err => {
+            console.warn('Block registry failed to load:', err);
+            console.log('Continuing without external blocks...');
+        });
+
+    /* -------------------------------------------------------
+       ✨ Auto-generate Traits for Custom Web-Components
+       -------------------------------------------------------*/
+    const CUSTOM_TRAITS = {
+        'alert-box': [
+            { type: 'select', name: 'variant', label: 'Variant', options: [
+                { id: 'info',    name: 'Info'    },
+                { id: 'success', name: 'Success' },
+                { id: 'warning', name: 'Warning' },
+                { id: 'error',   name: 'Error'   },
+            ]}
+        ],
+        'feature-grid': [ { type: 'number', name: 'columns', label: 'Columns' } ],
+        'cta-banner': [
+            { type: 'text',  name: 'text',   label: 'Headline' },
+            { type: 'text',  name: 'button', label: 'Button Label' },
+            { type: 'color', name: 'bg',     label: 'Background' },
+        ],
+        'landing-header': [
+            { type: 'text',     name: 'brand', label: 'Brand' },
+            { type: 'textarea', name: 'links', label: 'Links (JSON)' },
+        ],
+    };
+
+    /** Ensure the component has traits for all of its attributes + predefined ones */
+    function ensureTraits(cmp){
+        if(!cmp) return;
+        const tag = cmp.get('tagName');
+        if(!(tag && tag.includes('-'))) return; // Only custom elements
+
+        const predefined = CUSTOM_TRAITS[tag] || [];
+        // Current attributes on the element (e.g. variant, text, etc.)
+        const attrNames = Object.keys(cmp.getAttributes());
+        const dynamic   = attrNames.map(name => ({ type:'text', name, label:name }));
+
+        // Merge predefined + dynamic (avoid duplicates by name)
+        const allTraits = [...predefined];
+        dynamic.forEach(t => { if(!allTraits.find(pt => pt.name===t.name)) allTraits.push(t); });
+
+        // Apply only if traits not set yet to avoid resetting user edits each click
+        if(!cmp.get('customTraitsApplied')){
+            cmp.set({ traits: allTraits });
+            cmp.set('customTraitsApplied', true);
+        }
+    }
+
+    // Apply on selection (when user clicks a component)
+    editor.on('component:selected', cmp => ensureTraits(cmp));
+
+    // Also apply when a new component is dropped into the canvas
+    editor.on('component:add', cmp => ensureTraits(cmp));
+
+    /** Apply traits to all descendants starting from a root component */
+    function applyTraitsToTree(root){
+        ensureTraits(root);
+        root.components().forEach(child => applyTraitsToTree(child));
+    }
+
+    // Run once after editor is fully loaded to cover initially present components
+    editor.on('load', () => {
+        const root = editor.DomComponents.getWrapper();
+        applyTraitsToTree(root);
+    });
+
+    // --- Optional slot text editing trait (for innerHTML) ---
+    editor.TraitManager.addType('slot-content', {
+        createInput({ trait }){
+            const el = document.createElement('textarea');
+            el.style.width = '100%';
+            el.style.minHeight = '80px';
+            el.placeholder = 'HTML / Text';
+            return el;
+        },
+        onUpdate({ elInput, component, trait }){
+            elInput.value = component.get('slotContent') || component.getInnerHTML() || '';
+        },
+        onEvent({ elInput, component, trait }){
+            component.set({ slotContent: elInput.value });
+            if (typeof component.setInnerHTML === 'function') {
+                component.setInnerHTML(elInput.value || '');
+            } else {
+                component.components(elInput.value || '', { fromString: 1 });
+            }
+        }
+    });
+
+    // Update ensureTraits to optionally attach slot-content trait when relevant
+    const _origEnsureTraits = ensureTraits; // backup
+    ensureTraits = function(cmp){
+        _origEnsureTraits(cmp);
+        if(!cmp) return;
+        // If element has no attributes but some innerHTML (light DOM), allow editing that content
+        const tag = cmp.get('tagName');
+        if(!(tag && tag.includes('-'))) return;
+
+        const html = cmp.getInnerHTML && cmp.getInnerHTML().trim();
+        if(html){
+            const traits = cmp.get('traits') || [];
+            if(!traits.find(t=>t.name==='slot')){
+                traits.push({ type:'slot-content', name:'slot', label:'Content' });
+                cmp.set({ traits });
+            }
+        }
+    };
+
+    /* === Quick Change Bar (context-menu overlay) === */
+    (function createQuickChangeBar(editor){
+        if(!editor) return;
+        // Build overlay element once
+        const bar = document.createElement('div');
+        bar.id = 'quick-change-bar';
+        bar.innerHTML = `
+            <input type="text" placeholder="Ask for quick changes here..." />
+            <button><i class="fa-solid fa-arrow-up"></i></button>
+        `;
+        document.body.appendChild(bar);
+
+        const inputEl   = bar.querySelector('input');
+        const frameElFn = () => editor.Canvas.getFrameEl();
+
+        function showAt(centerX, posY){
+            // Ensure bar is displayed to measure its size
+            bar.style.display = 'flex';
+            const barWidth  = bar.offsetWidth;
+            const barHeight = bar.offsetHeight;
+            const margin    = 8;
+
+            // Center horizontally on centerX, then clamp inside viewport
+            let left = centerX - barWidth/2;
+            left = Math.max(margin, Math.min(left, window.innerWidth - barWidth - margin));
+
+            // Clamp vertically so it never goes outside bottom viewport
+            let top = posY;
+            top = Math.max(margin, Math.min(top, window.innerHeight - barHeight - margin));
+
+            bar.style.left = left + 'px';
+            bar.style.top  = top  + 'px';
+
+            inputEl.focus();
+        }
+        function hide(){
+            bar.style.display = 'none';
+            inputEl.blur();
+        }
+
+        // Hide on ESC or any left-click (mouse button 0)
+        document.addEventListener('keydown', e => { if(e.key === 'Escape') hide(); });
+        document.addEventListener('click', e => {
+            if(bar.style.display !== 'none' && e.button === 0) hide();
+        });
+
+        function applyQuickChange(raw){
+            if(!raw) return;
+            const cmp = editor.getSelected();
+            if(!cmp){ alert('Select a component first'); return; }
+
+            // Very simple parser: "change <prop> to <value>" OR plain text to set as content/text
+            const m = raw.match(/^\s*change\s+(\w+)\s+to\s+(.+)$/i);
+            let prop, val;
+            if(m){ prop = m[1].toLowerCase(); val = m[2]; }
+            else { prop = 'text'; val = raw; }
+
+            // If prop exists as attribute, set it; else if text-like prop update innerHTML
+            const attrs = cmp.getAttributes();
+            if(prop in attrs || prop!=='text'){
+                cmp.addAttributes({ [prop]: val });
+            } else {
+                if(typeof cmp.setInnerHTML==='function') cmp.setInnerHTML(val);
+                else cmp.components(val, { fromString:1 });
+            }
+        }
+
+        const sendBtn = bar.querySelector('button');
+        sendBtn.addEventListener('click', () => {
+            applyQuickChange(inputEl.value.trim());
+            hide();
+        });
+
+        // Submit on Enter key within input
+        inputEl.addEventListener('keydown', e=>{
+            if(e.key==='Enter'){
+                e.preventDefault();
+                applyQuickChange(inputEl.value.trim());
+                hide();
+            }
+        });
+
+        // Wait till GrapesJS canvas is fully ready (iframe loaded)
+        editor.on('canvas:ready', () => {
+            const doc = editor.Canvas.getDocument();
+            if(!doc) return;
+            doc.addEventListener('contextmenu', ev => {
+                const target = ev.target;
+                if(!target) return;
+                ev.preventDefault();
+
+                // Select the component inside GrapesJS (if not yet)
+                const cmpModel = editor.DomComponents.getComponent(target);
+                if(cmpModel) editor.select(cmpModel);
+
+                // Position bar centered below the component bounds
+                const iframeRect = frameElFn().getBoundingClientRect();
+                const rect = target.getBoundingClientRect();
+                const centerX = iframeRect.left + rect.left + rect.width/2;
+                const yUnder  = iframeRect.top  + rect.bottom + 8; // 8px below component
+                showAt(centerX, yUnder);
+            }, true);
+        });
+
+        /* NEW: Fallback handler for contextmenu events occurring OUTSIDE the iframe
+           (eg. on GrapesJS highlighter overlays). Ensures the quick-change bar still
+           appears when right-clicking the selected outline.
+        */
+        document.addEventListener('contextmenu', ev => {
+            const frameEl = frameElFn();
+            if(!frameEl) return;
+            // Ignore events originating from inside the iframe (handled above)
+            if(frameEl.contentDocument && ev.target.ownerDocument === frameEl.contentDocument) return;
+            const rect = frameEl.getBoundingClientRect();
+            // Proceed only if the click happened within the iframe bounds (overlays included)
+            if(!(ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom)) return;
+
+            ev.preventDefault();
+
+            // Try to map overlay element back to underlying model; otherwise keep currently selected
+            const cmpModel = editor.DomComponents.getComponent(ev.target) || editor.getSelected();
+            if(cmpModel) editor.select(cmpModel);
+
+            showAt(ev.clientX, ev.clientY);
+        }, true);
+    })(editor);
+
+    /* ----------------------------------
+       Download HTML (reuse core:save)
+    ----------------------------------*/
+    editor.Commands.add('download-html', {
+        run(ed){
+            ed.runCommand('core:save');
+        }
+    });
+
+    // Switch the existing top-bar download button to this new command
+    editor.on('load', () => {
+        const dlBtn = editor.Panels.getButton('panel-right','download');
+        if(dlBtn) dlBtn.set('command','download-html');
+    });
+
+    /* --------------------------------------------------------------
+       🗂️ Auto-load pages from /pages directory
+    --------------------------------------------------------------*/
+    async function autoLoadPages() {
+        // Helper to fetch list of HTML files in /pages directory.
+        // No hard-coded fallback: if nothing is discovered, the list stays empty.
+        let files = [];
+        try {
+            const dirRes = await fetch('pages/');
+            if (dirRes.ok) {
+                const dirHtml = await dirRes.text();
+                const p        = new DOMParser().parseFromString(dirHtml, 'text/html');
+                files = Array.from(p.querySelectorAll('a'))
+                          .map(a => a.getAttribute('href'))
+                          .filter(h => h && h.endsWith('.html'))
+                          .map(h => {
+                              const cleaned = h.replace(/^\/+/, ''); // remove any leading '/'
+                              return cleaned.split('/').pop();        // keep only basename e.g., 'landing.html'
+                          });
+            }
+        } catch (err) {
+            console.warn('Directory listing for /pages not available, falling back to defaults');
+        }
+        // Remove any pre-existing pages (eg the default "Untitled") before adding new ones
+        pageManager.getAll().forEach(p => pageManager.remove(p.id));
+
+        for (const file of files) {
+            try {
+                const resp = await fetch(`pages/${file}`);
+                if (!resp.ok) continue;
+                const rawHtml     = await resp.text();
+                const doc         = new DOMParser().parseFromString(rawHtml, 'text/html');
+                const titleText   = (doc.querySelector('title')?.textContent || '').trim();
+                const displayName = titleText || file.replace(/\.html$/,'').replace(/[-_]/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+                const bodyContent = doc.body ? doc.body.innerHTML : rawHtml;
+
+                const page = pageManager.add({ name: displayName, component: bodyContent });
+                page.set({
+                    path: `pages/${file}`,
+                    rawHtml,
+                    loaded: false, // Not yet mounted in canvas
+                });
+            } catch (err) {
+                console.error('Failed to load page', file, err);
+            }
+        }
+
+        // Select the first discovered page (if any) and load its content into the canvas
+        const first = pageManager.getAll()[0];
+        if (first) {
+            pageManager.select(first.id);
+        }
+    }
+
+    /* ---------------------------------------------------------
+       🌐 PAGE SWITCH HANDLER
+       Always store the HTML of the page we're leaving and
+       restore the HTML of the page we're entering. The first
+       time a page is opened we fetch it from disk, afterwards
+       we just reuse the stored markup. This ensures components
+       (and therefore their JS/CSS) are recreated at every switch.
+    ---------------------------------------------------------*/
+    let currentPageId = null;
+
+    editor.on('page:select', async (page) => {
+        if (!page) return;
+
+        /* 1️⃣  Persist markup of the page we're leaving */
+        if (currentPageId && currentPageId !== page.id) {
+            const prev = pageManager.get(currentPageId);
+            if (prev) {
+                try {
+                    prev.set({ component: editor.getHtml() });
+                } catch (err) {
+                    console.warn('Unable to save previous page HTML', err);
+                }
+            }
+        }
+
+        currentPageId = page.id;
+
+        /* 2️⃣  Make sure the base design-system bundle is present */
+        ensureBaseAssets();
+
+        /* 3️⃣  Load or reload the selected page */
+        const alreadyLoaded = page.get('loaded');
+        let rawHtml = page.get('rawHtml');
+
+        // First-time load: fetch the file
+        if (!alreadyLoaded) {
+            const path = page.get('path');
+            if (path) {
+                try {
+                    const res = await fetch(path);
+                    if (res.ok) {
+                        rawHtml = await res.text();
+                        page.set({ rawHtml });
+                    }
+                } catch (err) {
+                    console.error('Failed fetching page', path, err);
+                }
+            }
+        }
+
+        // Fallback: generate HTML from saved component if no rawHtml
+        if (!rawHtml) {
+            const compHtml = page.get('component') || '';
+            rawHtml = `<!DOCTYPE html><html><body>${compHtml}</body></html>`;
+            page.set({ rawHtml });
+        }
+
+        // Inject HEAD assets specific to this page (styles/scripts)
+        injectHeadAssets(rawHtml);
+
+        // Extract BODY markup and mount into canvas via GrapesJS
+        const parsed = new DOMParser().parseFromString(rawHtml, 'text/html');
+        const bodyMarkup = parsed.body ? parsed.body.innerHTML : rawHtml;
+        loadHtmlIntoEditor(rawHtml);
+
+        // Flag as loaded & make sure component HTML is stored for fast reloads
+        page.set({ component: bodyMarkup, loaded: true });
+    });
+
+    // Kick things off after the editor is ready
+    editor.on('load', () => {
+        autoLoadPages();
+    });
+
+    /* =====================================================
+       🔄 Ensure core design-system assets are present in the
+       currently active iframe (runs on every canvas rebuild)
+    ======================================================*/
+    function ensureBaseAssets() {
+        const doc = editor.Canvas.getDocument();
+        if (!doc) {
+            console.warn('Canvas document not ready');
+            return;
+        }
+        const head = doc.head;
+        
+        // Check if already loaded
+        if (head.querySelector('#base-assets-loaded')) {
+            console.log('Base assets already loaded');
+            return;
+        }
+
+        console.log('Loading base assets...');
+
+        /* --- Avoid duplicate custom element registrations ---- */
+        const dedupe = doc.createElement('script');
+        dedupe.textContent = `(()=>{const orig=customElements.define;customElements.define=function(n,c,o){if(customElements.get(n)){console.log('Skipping duplicate registration of',n);return;}console.log('Registering component:',n);orig.call(customElements,n,c,o);};})();`;
+        head.appendChild(dedupe);
+
+        /* 1) Lit runtime */
+        const lit = doc.createElement('script');
+        lit.type = 'module';
+        lit.src = 'https://unpkg.com/lit@3.1.2?module';
+        lit.onload = () => console.log('Lit runtime loaded');
+        lit.onerror = (e) => console.error('Failed to load Lit runtime', e);
+        head.appendChild(lit);
+
+        /* 2) DESIGN-SYSTEM CSS TOKENS */
+        const themeLink = doc.createElement('link');
+        themeLink.rel = 'stylesheet';
+        themeLink.id = 'theme';
+        themeLink.href = '/design-system/tokens-light.css';
+        themeLink.onload = () => console.log('Theme CSS loaded');
+        themeLink.onerror = () => {
+            console.warn('Theme CSS failed to load, using fallback');
+            // Fallback inline CSS
+            const fallbackStyle = doc.createElement('style');
+            fallbackStyle.textContent = `
+              :root {
+                --color-primary-500:#3b82f6; --color-primary-600:#2563eb;
+                --color-secondary-500:#6b7280;
+                --color-success-500:#10b981; --color-success-600:#059669;
+                --color-warning-500:#f59e0b; --color-warning-600:#d97706;
+                --color-error-500:#ef4444;   --color-error-600:#dc2626;
+                --color-info-bg:#eff6ff;     --color-info-border:#3b82f6; --color-info-text:#1e3a8a;
+                --color-success-bg:#ecfdf5;  --color-success-border:#10b981; --color-success-text:#065f46;
+                --color-warning-bg:#fff7ed;  --color-warning-border:#d97706; --color-warning-text:#92400e;
+                --color-error-bg:#fef2f2;    --color-error-border:#dc2626; --color-error-text:#7f1d1d;
+                --font-family-primary:'Inter',system-ui,sans-serif;
+                --font-size-base:1rem;
+                --spacing-sm:0.5rem; --spacing-md:1rem;
+                --border-radius-md:0.375rem;
+              }`;
+            head.appendChild(fallbackStyle);
+        };
+        head.appendChild(themeLink);
+
+        /* 3) DYNAMIC COMPONENT LOADER */
+        const loaderScript = doc.createElement('script');
+        loaderScript.type = 'module';
+        loaderScript.src = '/scripts/loader.js';
+        loaderScript.onload = () => console.log('Component loader loaded');
+        loaderScript.onerror = () => {
+            console.error('Failed to load component loader script');
+            // Create a fallback inline loader
+            const fallbackLoader = doc.createElement('script');
+            fallbackLoader.type = 'module';
+            fallbackLoader.textContent = `
+                window.ensureComponentLoaded = async function(tag) {
+                    console.log('Fallback loader attempting to load:', tag);
+                    if (!tag || !tag.includes('-') || customElements.get(tag)) return;
+                    
+                    const paths = [
+                        \`/components/\${tag}/\${tag}.js\`,
+                        \`/components/\${tag}.js\`
+                    ];
+                    
+                    for (const path of paths) {
+                        try {
+                            await import(path);
+                            if (customElements.get(tag)) {
+                                console.log('Successfully loaded:', tag);
+                                return;
+                            }
+                        } catch (err) {
+                            console.warn('Failed to load from', path, err);
+                        }
+                    }
+                    console.error('Component not found:', tag);
+                };
+            `;
+            head.appendChild(fallbackLoader);
+        };
+        head.appendChild(loaderScript);
+
+        // Mark as loaded
+        const marker = doc.createElement('meta');
+        marker.id = 'base-assets-loaded';
+        marker.name = 'base-assets-loaded';
+        marker.content = 'true';
+        head.appendChild(marker);
+
+        console.log('Base assets loading initiated');
+    }
+
+    // Inject on every new iframe ready event
+    editor.on('canvas:ready', ensureBaseAssets);
+
+    // Also make sure it runs shortly after each explicit page switch
+    editor.on('page:select', () => setTimeout(ensureBaseAssets, 50));
+
+    /* -------------------------------------------------------------
+       ▶️ Inject HEAD assets (style/link/script) from raw HTML string
+       -------------------------------------------------------------*/
+    function injectHeadAssets(rawHtml){
+        if(!rawHtml) return;
+        const parser = new DOMParser();
+        const parsed = parser.parseFromString(rawHtml,'text/html');
+        const styleTags  = Array.from(parsed.querySelectorAll('style'));
+        const linkTags   = Array.from(parsed.querySelectorAll('link'));
+        const scriptTags = Array.from(parsed.querySelectorAll('script')).filter(sc=>{
+            const srcAttr=(sc.getAttribute('src')||'').toLowerCase();
+            const innerTxt=(sc.textContent||'').toLowerCase();
+            if(srcAttr.includes('grapes')||innerTxt.includes('grapesjs')) return false;
+            return true;
+        });
+
+        const canvasDoc = editor.Canvas.getDocument();
+        if(!canvasDoc) return;
+        const head = canvasDoc.head;
+
+        const alreadyExternal = new Set();
+        head.querySelectorAll('link[href]').forEach(l=>alreadyExternal.add(l.getAttribute('href')));
+        head.querySelectorAll('script[src]').forEach(s=>alreadyExternal.add(s.getAttribute('src')));
+        const alreadyInlineStyle = new Set();
+        head.querySelectorAll('style').forEach(s=>alreadyInlineStyle.add(s.textContent.trim()));
+
+        linkTags.forEach(linkEl=>{
+            const href=linkEl.getAttribute('href');
+            if(href && alreadyExternal.has(href)) return;
+            const clone = canvasDoc.createElement('link');
+            Array.from(linkEl.attributes).forEach(attr=>clone.setAttribute(attr.name,attr.value));
+            head.appendChild(clone);
+            if(href) alreadyExternal.add(href);
+        });
+
+        styleTags.forEach(styleEl=>{
+            const cssText = styleEl.textContent.trim();
+            if(!cssText || alreadyInlineStyle.has(cssText)) return;
+            const clone = canvasDoc.createElement('style');
+            Array.from(styleEl.attributes).forEach(attr=>clone.setAttribute(attr.name,attr.value));
+            clone.textContent = cssText;
+            head.appendChild(clone);
+            alreadyInlineStyle.add(cssText);
+        });
+
+        scriptTags.forEach(scriptEl=>{
+            const src=scriptEl.getAttribute('src');
+            if(src && alreadyExternal.has(src)) return;
+            const clone = canvasDoc.createElement('script');
+            Array.from(scriptEl.attributes).forEach(attr=>clone.setAttribute(attr.name,attr.value));
+            if(!src) clone.textContent = scriptEl.textContent;
+            head.appendChild(clone);
+            if(src) alreadyExternal.add(src);
+        });
+    }
+
+    function ensureLoader(win) {
+      const doc = win.document;
+      if (!doc.getElementById('component-loader')) {
+        const s = doc.createElement('script');
+        s.id   = 'component-loader';
+        s.type = 'module';
+        s.src  = '/scripts/loader.js';
+        doc.head.appendChild(s);
+      }
+    }
+</script>
+</body>
+</html> 
