@@ -724,12 +724,9 @@ const Hero = () => {
       .slice(0, 2)
       .map((att) => att.url);
 
-    const startingPointPrompt = selectedStartingPoint?.prompt || "";
-    const combinedPrompt = startingPointPrompt
-      ? `${startingPointPrompt}\n\nUser request:\n${input.trim()}`
-      : input.trim();
+    const userPrompt = input.trim();
 
-    sessionStorage.setItem("input", input);
+    sessionStorage.setItem("input", userPrompt);
     sessionStorage.setItem("model", selectedModel);
     const characters = "abcdefghijklmnopqrstuvwxyz123456789";
     const generateSegment = (length: number) =>
@@ -740,7 +737,7 @@ const Hero = () => {
     const projectId = `${generateSegment(8)}-${generateSegment(8)}-${generateSegment(8)}-${generateSegment(8)}`;
 
     const payload = {
-      prompt: combinedPrompt,
+      prompt: userPrompt,
       model: selectedModel,
       attachments: attachmentUrls,
       attachmentCount: attachmentUrls.length,
@@ -755,7 +752,7 @@ const Hero = () => {
     const userMessage: Message = {
       id: `msg-${Date.now()}-${Math.random()}`,
       role: "user",
-      content: input.trim(),
+      content: userPrompt,
       createdAt: new Date().toISOString(), // Add timestamp when message is created
       attachments: attachments
         .filter((att) => !att.isUploading && att.url)

@@ -775,6 +775,45 @@ const Messages = () => {
             );
           }) || [];
         // Group consecutive code_write messages
+        const extractMessageFileWrites = (
+          msg: any,
+        ): Array<{ path: string; content: string }> => {
+          const rawCandidates = [
+            msg?.toolResult?.fileWrite,
+            msg?.toolResult?.fileWrites,
+            msg?.toolResult?.result?.fileWrite,
+            msg?.toolResult?.result?.fileWrites,
+            msg?.fileWrite,
+            msg?.fileWrites,
+          ];
+
+          const writes: Array<{ path: string; content: string }> = [];
+          rawCandidates.forEach((candidate) => {
+            if (!candidate) return;
+
+            const items = Array.isArray(candidate) ? candidate : [candidate];
+            items.forEach((entry) => {
+              if (
+                entry &&
+                typeof entry.path === "string" &&
+                typeof entry.content === "string"
+              ) {
+                writes.push({
+                  path: entry.path,
+                  content: entry.content,
+                });
+              }
+            });
+          });
+
+          const deduped = new Map<string, { path: string; content: string }>();
+          writes.forEach((write) => {
+            deduped.set(`${write.path}::${write.content}`, write);
+          });
+
+          return Array.from(deduped.values());
+        };
+
         const groupFileWrites = () => {
           const groups: Array<{
             startIndex: number;
@@ -787,23 +826,16 @@ const Messages = () => {
 
           messages?.forEach((msg, index) => {
             if (msg.toolResult?.UsedTool === "code_write") {
-              // Try multiple ways to access fileWrite
-              const fileWrite =
-                (msg.toolResult as any).fileWrite ||
-                (msg.toolResult as any).result?.fileWrite ||
-                (msg as any).fileWrite;
+              const messageFileWrites = extractMessageFileWrites(msg);
 
-              if (fileWrite?.path && fileWrite?.content) {
+              if (messageFileWrites.length > 0) {
                 if (!currentGroup) {
                   currentGroup = {
                     startIndex: index,
                     fileWrites: [],
                   };
                 }
-                currentGroup.fileWrites.push({
-                  path: fileWrite.path,
-                  content: fileWrite.content,
-                });
+                currentGroup.fileWrites.push(...messageFileWrites);
               }
             } else {
               if (currentGroup) {

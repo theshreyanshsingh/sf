@@ -124,13 +124,24 @@ const chatSlice = createSlice({
     },
     // Add a new message to the messages array
     addMessage: (state, action: PayloadAction<Message>) => {
-      // If message has a chatId, only add it if it matches the current chatId
-      // If state.chatId is null (New Chat), reject messages that have a specific chatId
-      if (
-        action.payload.chatId &&
-        (!state.chatId || action.payload.chatId !== state.chatId)
-      ) {
-        return;
+      const incomingChatId = action.payload.chatId;
+      if (incomingChatId) {
+        const activeChatIds = new Set(
+          [state.chatId, state.messagesChatId, state.streamChatId].filter(
+            (value): value is string => typeof value === "string" && value.length > 0,
+          ),
+        );
+
+        if (activeChatIds.size > 0 && !activeChatIds.has(incomingChatId)) {
+          return;
+        }
+
+        if (!state.chatId) {
+          state.chatId = incomingChatId;
+        }
+        if (!state.messagesChatId) {
+          state.messagesChatId = incomingChatId;
+        }
       }
 
       if (state.messages === null) {
@@ -144,9 +155,25 @@ const chatSlice = createSlice({
         state.messages = [];
       }
 
-      // Filter messages that don't match current chatId (if they have one)
+      const activeChatIds = new Set(
+        [state.chatId, state.messagesChatId, state.streamChatId].filter(
+          (value): value is string => typeof value === "string" && value.length > 0,
+        ),
+      );
+
+      const firstIncomingChatId =
+        action.payload.find((msg) => typeof msg.chatId === "string" && msg.chatId.length > 0)
+          ?.chatId || null;
+
+      if (!state.chatId && firstIncomingChatId) {
+        state.chatId = firstIncomingChatId;
+      }
+      if (!state.messagesChatId && firstIncomingChatId) {
+        state.messagesChatId = firstIncomingChatId;
+      }
+
       const messagesToAdd = action.payload.filter((msg) => {
-        if (msg.chatId && (!state.chatId || msg.chatId !== state.chatId)) {
+        if (msg.chatId && activeChatIds.size > 0 && !activeChatIds.has(msg.chatId)) {
           return false;
         }
         return true;
@@ -165,6 +192,7 @@ const chatSlice = createSlice({
       action: PayloadAction<{ messages: Message[]; chatId: string }>
     ) => {
       state.messages = action.payload.messages;
+      state.chatId = action.payload.chatId;
       state.messagesChatId = action.payload.chatId;
     },
     // Set suggested prompt for input injection

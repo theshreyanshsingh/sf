@@ -179,11 +179,24 @@ export const useCreateResponse = () => {
     if (!payload || typeof payload !== "object") return null;
 
     const record = payload as Record<string, unknown>;
+    const toolName =
+      typeof record.UsedTool === "string"
+        ? record.UsedTool
+        : typeof record.usedTool === "string"
+          ? record.usedTool
+          : typeof record.tool === "string"
+            ? record.tool
+            : null;
+    const canUseGenericUrl =
+      toolName === "code_write" || toolName === "save_code";
+
     const directCodeUrl =
       typeof record.codeUrl === "string"
         ? record.codeUrl
         : typeof record.code_url === "string"
           ? record.code_url
+          : canUseGenericUrl && typeof record.url === "string"
+            ? record.url
           : null;
 
     if (directCodeUrl?.trim()) {
@@ -199,6 +212,8 @@ export const useCreateResponse = () => {
         ? resultRecord.codeUrl
         : typeof resultRecord.code_url === "string"
           ? resultRecord.code_url
+          : canUseGenericUrl && typeof resultRecord.url === "string"
+            ? resultRecord.url
           : null;
 
     return nestedCodeUrl?.trim() || null;
@@ -479,6 +494,10 @@ export const useCreateResponse = () => {
     try {
       let effectiveChatId = chatId || activeChatId || undefined;
       const hydratedCodeUrls = new Set<string>();
+
+      if (effectiveChatId) {
+        persistChatId(effectiveChatId, projectId);
+      }
 
       const currentReduxRuntime = store.getState().projectOptions.previewRuntime;
       previewRuntimeRef.current = currentReduxRuntime;
@@ -1054,6 +1073,10 @@ export const useCreateResponse = () => {
     try {
       let effectiveChatId = chatId || activeChatId || undefined;
       const hydratedCodeUrls = new Set<string>();
+
+      if (effectiveChatId) {
+        persistChatId(effectiveChatId, projectId);
+      }
 
       const currentReduxRuntime = store.getState().projectOptions.previewRuntime;
       previewRuntimeRef.current = currentReduxRuntime;

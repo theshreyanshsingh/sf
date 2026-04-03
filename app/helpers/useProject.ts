@@ -200,9 +200,23 @@ export function useProject() {
       dispatch(setChatId(resolvedChatId));
     }
 
+    const normalizedUserRequest = lastMessageContent.trim();
+    const normalizedStartingPrompt = startingTemplate?.prompt?.trim() || "";
+    const shouldAppendUserRequest =
+      normalizedUserRequest.length > 0 &&
+      normalizedUserRequest !== normalizedStartingPrompt;
+
     const finalPrompt = shouldApplyStartingPoint
-      ? `[STARTING_POINT]\nTemplate: ${startingTemplate?.label}\n\n${startingTemplate?.prompt}\n\nUser request:\n${lastMessageContent}\n\nInstructions:\n- Follow the template structure.\n- Customize to match the user request.\n- Keep the design responsive and production-ready.\n[END_STARTING_POINT]`
-      : lastMessageContent;
+      ? `[STARTING_POINT]\nTemplate: ${startingTemplate?.label}\n\n${startingTemplate?.prompt}\n${
+          shouldAppendUserRequest
+            ? `\nUser request:\n${normalizedUserRequest}\n`
+            : "\n"
+        }Instructions:\n- Follow the template structure.\n${
+          shouldAppendUserRequest
+            ? "- Customize to match the user request.\n"
+            : ""
+        }- Keep the design responsive and production-ready.\n[END_STARTING_POINT]`
+      : normalizedUserRequest;
 
     createResponse({
       email: session?.user.email || "",
