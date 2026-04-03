@@ -34,6 +34,14 @@ function main() {
     args.push("--webpack");
   }
 
+  // Next.js < 16 still runs linting during `next build`. We used to disable
+  // that via `next.config`, but Next.js 16 removed the `eslint` config field.
+  // Preserve the old build behavior through the CLI so the config stays
+  // compatible with both versions.
+  if (command === "build" && nextMajor && nextMajor < 16) {
+    args.push("--no-lint");
+  }
+
   const child = spawn(process.execPath, args, {
     stdio: "inherit",
     env: process.env,

@@ -6,7 +6,7 @@
         "dev": "node scripts/run-next.js dev",
         "build": "node scripts/run-next.js build",
         "start": "next start",
-        "lint": "next lint"
+        "lint": "eslint ."
     },
     "dependencies": {
         "@babel/standalone": "^7.26.10",

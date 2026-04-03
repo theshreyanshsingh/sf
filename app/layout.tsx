@@ -1,20 +1,9 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import localFont from "next/font/local";
 import "./globals.css";
 import Script from "next/script";
 import { ClientProviders } from "./helpers/ClientProviders";
 import { RuntimeEnvScript } from "./_components/RuntimeEnvScript";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 const insSerif = localFont({
   src: "./assets/fonts/InstrumentSerif-Regular.ttf",
@@ -60,7 +49,7 @@ export default function RootLayout({
         </Script>
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${insSerif.variable} ${insSerifIt.variable} antialiased`}
+        className={`${insSerif.variable} ${insSerifIt.variable} antialiased`}
       >
         <ClientProviders>{children}</ClientProviders>
       </body>
