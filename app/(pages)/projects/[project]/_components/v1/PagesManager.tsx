@@ -140,10 +140,10 @@ const PagesManager = () => {
 
   const resolveReactApp = useCallback(async () => {
     const appCandidates = [
-      "workspace/src/App.jsx",
-      "workspace/src/App.tsx",
       "src/App.jsx",
       "src/App.tsx",
+      "workspace/src/App.jsx",
+      "workspace/src/App.tsx",
     ];
     const appFile = await findFileContent(appCandidates);
     if (!appFile) return null;

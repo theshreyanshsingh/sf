@@ -1,15 +1,15 @@
 import { normalizeIncomingFileContent } from "../_services/fileUpdatesMobile";
-import { ensureWorkspacePath } from "./workspacePaths";
+import { normalizeWebProjectPath } from "./workspacePaths";
 
 const MAIN_ENTRY_CANDIDATES = [
-  "workspace/src/main.tsx",
-  "workspace/src/main.jsx",
-  "workspace/src/main.ts",
-  "workspace/src/main.js",
-  "workspace/src/index.tsx",
-  "workspace/src/index.jsx",
-  "workspace/src/index.ts",
-  "workspace/src/index.js",
+  "src/main.tsx",
+  "src/main.jsx",
+  "src/main.ts",
+  "src/main.js",
+  "src/index.tsx",
+  "src/index.jsx",
+  "src/index.ts",
+  "src/index.js",
 ];
 
 const normalizeFileContent = (value: unknown): string => {
@@ -45,10 +45,10 @@ const isTestScaffoldIndex = (content: string): boolean => {
 };
 
 const detectAppExtension = (fileMap: Record<string, string>): "tsx" | "jsx" => {
-  if (fileMap["workspace/src/App.tsx"]) return "tsx";
-  if (fileMap["workspace/src/App.jsx"]) return "jsx";
-  if (fileMap["workspace/src/App.ts"]) return "tsx";
-  if (fileMap["workspace/src/App.js"]) return "jsx";
+  if (fileMap["src/App.tsx"]) return "tsx";
+  if (fileMap["src/App.jsx"]) return "jsx";
+  if (fileMap["src/App.ts"]) return "tsx";
+  if (fileMap["src/App.js"]) return "jsx";
   return "jsx";
 };
 
@@ -57,8 +57,7 @@ const ensureViteEntryFiles = (fileMap: Record<string, string>) => {
   const appExt = detectAppExtension(fileMap);
   const existingMain =
     MAIN_ENTRY_CANDIDATES.find((path) => path in fileMap) || null;
-  const mainPath =
-    existingMain || `workspace/src/main.${appExt === "tsx" ? "tsx" : "jsx"}`;
+  const mainPath = existingMain || `src/main.${appExt === "tsx" ? "tsx" : "jsx"}`;
 
   if (!existingMain) {
     const appImportExt = appExt === "tsx" ? "tsx" : "jsx";
@@ -77,13 +76,13 @@ if (rootElement) {
 `;
   }
 
-  const existingIndex = fileMap["workspace/index.html"];
+  const existingIndex = fileMap["index.html"];
   const shouldReplaceIndex =
     typeof existingIndex === "string" && isTestScaffoldIndex(existingIndex);
 
-  if (!fileMap["workspace/index.html"] || shouldReplaceIndex) {
-    const entryPath = mainPath.replace(/^workspace\//, "");
-    generated["workspace/index.html"] = `<!doctype html>
+  if (!fileMap["index.html"] || shouldReplaceIndex) {
+    const entryPath = mainPath;
+    generated["index.html"] = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -113,7 +112,7 @@ export const normalizeWebProjectFiles = (
 
   for (const [rawPath, value] of Object.entries(fileMap)) {
     if (!rawPath) continue;
-    const normalizedPath = ensureWorkspacePath(rawPath);
+    const normalizedPath = normalizeWebProjectPath(rawPath);
     if (!normalizedPath) continue;
     if (normalizedPath !== rawPath.replace(/^\/+/, "")) {
       didNormalizePaths = true;

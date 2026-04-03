@@ -15,9 +15,8 @@ export type EmbedState = {
 
 export const resolvePageRoot = (siteGraph?: SiteGraph | null) => {
   if (!siteGraph) return "";
-  if (siteGraph.pageRoot) return siteGraph.pageRoot;
-  if (siteGraph.pages?.some((p) => p.path?.startsWith("workspace/"))) {
-    return "workspace/";
+  if (siteGraph.pageRoot && siteGraph.pageRoot !== "workspace/") {
+    return siteGraph.pageRoot;
   }
   if (siteGraph.pages?.some((p) => p.path?.startsWith("pages/"))) {
     return "pages/";

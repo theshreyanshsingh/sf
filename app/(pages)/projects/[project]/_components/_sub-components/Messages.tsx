@@ -76,8 +76,9 @@ const FileWrites = ({
   if (fileWrites.length === 0) return null;
 
   const formatPath = (path: string) => {
-    // Remove /workspace prefix if present
-    return path.replace(/^\/workspace/, "");
+    return path
+      .replace(/^\/workspace\//, "/")
+      .replace(/^workspace\//, "");
   };
 
   return (

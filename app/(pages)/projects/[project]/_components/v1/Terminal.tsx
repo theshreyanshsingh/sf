@@ -1,16 +1,17 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
 import { boot, getContainer, fetchAndMountTestFiles, onServerReady, syncFiles } from "@/app/helpers/webcontainer";
-import { useDispatch } from "react-redux";
-import { store } from "@/app/redux/store";
+import { useDispatch, useSelector } from "react-redux";
+import { RootState, store } from "@/app/redux/store";
 import { setPreviewUrl } from "@/app/redux/reducers/projectOptions";
 import { IoClose } from "react-icons/io5";
 import { LuLoader } from "react-icons/lu";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { WebContainerProcess } from "@webcontainer/api";
+import { normalizeWebProjectFiles } from "@/app/helpers/normalizeWebProjectFiles";
 
 declare global {
   interface Window {
@@ -53,9 +54,19 @@ const XTERM_THEME = {
 
 const Terminal = () => {
   const dispatch = useDispatch();
+  const projectFilesData = useSelector(
+    (state: RootState) => state.projectFiles.data,
+  );
   const [bootState, setBootState] = useState<BootState>("idle");
   const [terminals, setTerminals] = useState<string[]>(["terminal-1"]);
   const [activeTerminal, setActiveTerminal] = useState("terminal-1");
+  const normalizedProjectFiles = useMemo(
+    () =>
+      normalizeWebProjectFiles(
+        (projectFilesData as Record<string, unknown> | null | undefined) ?? null,
+      ).files,
+    [projectFilesData],
+  );
 
   const terminalsRef = useRef(["terminal-1"]);
   const activeTerminalRef = useRef("terminal-1");
@@ -76,6 +87,7 @@ const Terminal = () => {
   /* ------------------------------------------------------------ */
 
   const setupDoneRef = useRef(false);
+  const lastProjectSyncSignatureRef = useRef("");
 
   useEffect(() => {
     if (bootState !== "idle") return;
@@ -170,26 +182,40 @@ const Terminal = () => {
     if (id === "terminal-1" && !setupDoneRef.current) {
       setupDoneRef.current = true;
       (async () => {
-        // 1. Base layer: test-files scaffold
-        const testFiles = await fetchAndMountTestFiles();
+        const waitForInitialProjectFiles = async (
+          timeoutMs = 2000,
+          intervalMs = 100,
+        ) => {
+          const startedAt = Date.now();
+          while (Date.now() - startedAt < timeoutMs) {
+            const snapshot = normalizeWebProjectFiles(
+              (store.getState().projectFiles.data as
+                | Record<string, unknown>
+                | null
+                | undefined) ?? null,
+            ).files;
+            if (Object.keys(snapshot).length > 0) {
+              return snapshot;
+            }
+            await new Promise((resolve) => setTimeout(resolve, intervalMs));
+          }
+          return {};
+        };
 
-        // 2. Overlay: real project files from Redux (fetched from backend API)
-        //    Skip files that would break the Vite scaffold (e.g. static HTML index.html)
-        const reduxData = store.getState().projectFiles.data as Record<string, string> | null;
-        if (reduxData && Object.keys(reduxData).length > 0) {
-          const filesToSync: Record<string, string> = {};
-          for (const [path, content] of Object.entries(reduxData)) {
-            if (path === "index.html" && !content.includes('<script type="module"')) continue;
-            filesToSync[path] = content;
-          }
-          if (Object.keys(filesToSync).length > 0) {
-            await syncFiles(filesToSync);
-          }
+        const initialProjectFiles = await waitForInitialProjectFiles();
+        let testFiles: Record<string, string> | null = null;
+
+        if (!initialProjectFiles["package.json"]) {
+          testFiles = await fetchAndMountTestFiles();
+        }
+
+        if (Object.keys(initialProjectFiles).length > 0) {
+          await syncFiles(initialProjectFiles);
         }
 
         const hasPackageJson =
-          (testFiles && testFiles["package.json"]) ||
-          (reduxData && reduxData["package.json"]);
+          initialProjectFiles["package.json"] ||
+          (testFiles && testFiles["package.json"]);
 
         if (hasPackageJson) {
           await new Promise((r) => setTimeout(r, 800));
@@ -204,6 +230,24 @@ const Terminal = () => {
       })().catch((err) => console.error("[terminal] auto-setup failed:", err));
     }
   }, []);
+
+  useEffect(() => {
+    if (bootState !== "ready") return;
+    const fileKeys = Object.keys(normalizedProjectFiles);
+    if (fileKeys.length === 0) return;
+
+    const signature = fileKeys
+      .sort()
+      .map((key) => `${key}:${normalizedProjectFiles[key]?.length ?? 0}`)
+      .join("|");
+
+    if (lastProjectSyncSignatureRef.current === signature) return;
+    lastProjectSyncSignatureRef.current = signature;
+
+    syncFiles(normalizedProjectFiles).catch((err) =>
+      console.warn("[terminal] project file sync failed:", err),
+    );
+  }, [bootState, normalizedProjectFiles]);
 
   /* ------------------------------------------------------------ */
   /*  Init first terminal once container is ready                  */

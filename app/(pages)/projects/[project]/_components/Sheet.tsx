@@ -148,8 +148,10 @@ const Sheet: NextPage = () => {
     const hasPackageJson =
       !!projectData &&
       typeof projectData === "object" &&
-      ("workspace/package.json" in (projectData as Record<string, unknown>) ||
-        "package.json" in (projectData as Record<string, unknown>));
+      Object.keys(projectData as Record<string, unknown>).some(
+        (key) =>
+          key.replace(/^\/+/, "").replace(/^workspace\//, "") === "package.json",
+      );
     const isPartialProjectData = hasProjectData && !hasPackageJson;
     const shouldRefetch =
       lastFetchedUrlRef.current !== url ||

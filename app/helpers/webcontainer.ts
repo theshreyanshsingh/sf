@@ -12,6 +12,12 @@ import type {
 let instance: WebContainer | null = null;
 let booting: Promise<WebContainer> | null = null;
 
+const normalizeProjectPath = (path: string): string =>
+  (path || "")
+    .trim()
+    .replace(/^\/+/, "")
+    .replace(/^workspace\//, "");
+
 export async function boot(): Promise<WebContainer> {
   if (instance) return instance;
   if (booting) return booting;
@@ -44,7 +50,8 @@ export async function writeFile(
   content: string | Uint8Array,
 ): Promise<void> {
   const wc = await boot();
-  const abs = path.startsWith("/") ? path : `/${path}`;
+  const normalized = normalizeProjectPath(path);
+  const abs = normalized ? `/${normalized}` : "/";
   const dir = abs.substring(0, abs.lastIndexOf("/"));
   if (dir && dir !== "/") {
     await wc.fs.mkdir(dir, { recursive: true }).catch(() => {});
@@ -57,13 +64,15 @@ export async function readFile(
   encoding: "utf-8" | null = "utf-8",
 ): Promise<string | Uint8Array> {
   const wc = await boot();
-  const abs = path.startsWith("/") ? path : `/${path}`;
+  const normalized = normalizeProjectPath(path);
+  const abs = normalized ? `/${normalized}` : "/";
   return encoding ? wc.fs.readFile(abs, encoding) : wc.fs.readFile(abs);
 }
 
 export async function mkdirp(path: string): Promise<void> {
   const wc = await boot();
-  const abs = path.startsWith("/") ? path : `/${path}`;
+  const normalized = normalizeProjectPath(path);
+  const abs = normalized ? `/${normalized}` : "/";
   await wc.fs.mkdir(abs, { recursive: true });
 }
 
@@ -72,13 +81,15 @@ export async function rm(
   opts: { recursive?: boolean; force?: boolean } = {},
 ): Promise<void> {
   const wc = await boot();
-  const abs = path.startsWith("/") ? path : `/${path}`;
+  const normalized = normalizeProjectPath(path);
+  const abs = normalized ? `/${normalized}` : "/";
   await wc.fs.rm(abs, { recursive: opts.recursive ?? false, force: opts.force ?? true });
 }
 
 export async function readdir(path: string): Promise<string[]> {
   const wc = await boot();
-  const abs = path.startsWith("/") ? path : `/${path}`;
+  const normalized = normalizeProjectPath(path);
+  const abs = normalized ? `/${normalized}` : "/";
   return wc.fs.readdir(abs);
 }
 
@@ -110,7 +121,7 @@ function buildTree(files: Record<string, string>): FileSystemTree {
   const root: Record<string, TreeNode> = {};
 
   for (const [filePath, contents] of Object.entries(files)) {
-    const clean = filePath.replace(/^\/+/, "");
+    const clean = normalizeProjectPath(filePath);
     if (!clean) continue;
 
     const parts = clean.split("/");
@@ -176,14 +187,17 @@ export async function syncFiles(
   if (!wc) return;
 
   for (const [rawPath, content] of Object.entries(files)) {
+    const normalizedPath = normalizeProjectPath(rawPath);
+    if (!normalizedPath) continue;
+
     // Don't overwrite the Vite entry index.html with a static HTML page
     if (
-      rawPath === "index.html" &&
+      normalizedPath === "index.html" &&
       typeof content === "string" &&
       !content.includes('<script type="module"')
     ) continue;
 
-    const abs = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
+    const abs = `/${normalizedPath}`;
     const dir = abs.substring(0, abs.lastIndexOf("/"));
     try {
       if (dir && dir !== "/") {

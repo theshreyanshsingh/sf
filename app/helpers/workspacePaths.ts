@@ -1,12 +1,13 @@
-export const ensureWorkspacePath = (rawPath: string): string => {
+export const normalizeWebProjectPath = (rawPath: string): string => {
   let next = (rawPath || "").trim();
   if (!next) return "";
   next = next.replace(/^\/+/, "");
-  if (!next.startsWith("workspace/")) {
-    next = `workspace/${next}`;
-  }
+  next = next.replace(/^workspace\//, "");
   return next;
 };
+
+export const ensureWorkspacePath = (rawPath: string): string =>
+  normalizeWebProjectPath(rawPath);
 
 export const resolveWebContainerWorkspaceDir = (
   workdir?: string | null,
@@ -27,9 +28,8 @@ export const toWebContainerPath = (
   rawPath: string,
   workdir?: string | null,
 ): string => {
-  const normalized = ensureWorkspacePath(rawPath);
+  const normalized = normalizeWebProjectPath(rawPath);
   if (!normalized) return "";
-  const relative = normalized.replace(/^workspace\//, "");
   const baseDir = resolveWebContainerWorkspaceDir(workdir).replace(/\/$/, "");
-  return `${baseDir}/${relative}`.replace(/\/{2,}/g, "/");
+  return `${baseDir}/${normalized}`.replace(/\/{2,}/g, "/");
 };

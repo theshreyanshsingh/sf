@@ -52,6 +52,7 @@ import {
   resolvePreviewRuntimeFromLooseHint,
   resolvePreviewRuntimeFromRecord,
 } from "@/app/helpers/previewRuntime";
+import { normalizeWebProjectPath } from "@/app/helpers/workspacePaths";
 
 export const useCreateResponse = () => {
   const dispatch = useDispatch<AppDispatch>();
@@ -151,8 +152,7 @@ export const useCreateResponse = () => {
     if (!projectData || typeof projectData !== "object") return true;
     const keys = Object.keys(projectData as Record<string, unknown>);
     const hasPackageJson =
-      "workspace/package.json" in (projectData as Record<string, unknown>) ||
-      "package.json" in (projectData as Record<string, unknown>);
+      keys.some((key) => normalizeWebProjectPath(key) === "package.json");
     return keys.length === 0 || !hasPackageJson;
   };
 
@@ -219,7 +219,10 @@ export const useCreateResponse = () => {
   ): Record<string, string> => {
     const next: Record<string, string> = {};
     writes.forEach((write) => {
-      const normalizedPath = write.path.replace(/^\/+/, "");
+      const normalizedPath =
+        previewRuntimeRef.current === "web"
+          ? normalizeWebProjectPath(write.path)
+          : write.path.replace(/^\/+/, "");
       if (!normalizedPath) return;
       next[normalizedPath] = write.content;
     });
@@ -250,16 +253,13 @@ export const useCreateResponse = () => {
     if (typeof fileContent === "string") {
       fileContent = normalizeIncomingFileContent(fileContent);
 
-      // Normalize path (ensure it starts with / if needed, but keep workspace)
-      let normalizedPath = filePath.replace(/^\/+/, ""); // Remove leading slashes
-
-      // Force workspace directory if not already present
-      if (!normalizedPath.startsWith("workspace/")) {
-        normalizedPath = "workspace/" + normalizedPath;
-      }
+      const normalizedPath =
+        previewRuntimeRef.current === "web"
+          ? normalizeWebProjectPath(filePath)
+          : filePath.replace(/^\/+/, "");
 
       // Only update if we have a valid path
-      if (filePath) {
+      if (normalizedPath) {
         const previewPath = normalizeWorkspacePathForSnack(normalizedPath);
         const sanitizedPreviewContent = sanitizeFileWriteContent(
           previewPath,
@@ -292,7 +292,7 @@ export const useCreateResponse = () => {
 
         dispatch(
           updateSpecificFile({
-            filePath: normalizedPath, // Use normalizedPath to ensure workspace prefix in Redux
+            filePath: normalizedPath,
             content: contentForStorage,
             createDirectories: true,
           }),
