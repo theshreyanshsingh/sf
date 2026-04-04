@@ -19,8 +19,20 @@ declare global {
     removeTerminal: (terminalId: string) => boolean;
     getTerminalList: () => string[];
     writeTerminalInput?: (terminalId: string, input: string) => Promise<boolean>;
-    executeTerminalCommand?: (command: string) => Promise<{ success: boolean; output: string }>;
-    executeClaudeCommand?: (command: string) => Promise<{ success: boolean; output: string }>;
+    executeTerminalCommand?: (
+      command: string,
+      options?: {
+        timeoutMs?: number;
+        idleMs?: number;
+      },
+    ) => Promise<{ success: boolean; output: string }>;
+    executeClaudeCommand?: (
+      command: string,
+      options?: {
+        timeoutMs?: number;
+        idleMs?: number;
+      },
+    ) => Promise<{ success: boolean; output: string }>;
     terminalInterrupt: () => Promise<boolean>;
     terminalReady: boolean;
     terminalIsBusy: boolean;
@@ -259,24 +271,38 @@ const Terminal = () => {
   /*  Execute a command programmatically & wait for result         */
   /* ------------------------------------------------------------ */
 
-  const execInTerminal = useCallback((terminalId: string, command: string): Promise<{ success: boolean; output: string }> => {
+  const execInTerminal = useCallback((
+    terminalId: string,
+    command: string,
+    options?: {
+      timeoutMs?: number;
+      idleMs?: number;
+    },
+  ): Promise<{ success: boolean; output: string }> => {
     const writer = writerRef.current[terminalId];
     if (!writer) return Promise.resolve({ success: false, output: "" });
 
     window.terminalIsBusy = true;
 
     return new Promise((resolve) => {
+      const timeoutMs = options?.timeoutMs ?? 10000;
+      const idleMs = options?.idleMs ?? 500;
       let buf = "";
       let idle: ReturnType<typeof setTimeout> | null = null;
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       let outputSince = false;
+      let finished = false;
 
       const promptRe = [/\$ $/, />.* $/, /\] \$ $/, /\w+@\w+:.+\$ $/];
       const errorRe = [/command not found/i, /no such file or directory/i, /permission denied/i, /error:/i, /failed:/i];
 
       const finish = () => {
+        if (finished) return;
+        finished = true;
         const i = (outputCbs.current[terminalId] ?? []).indexOf(cb);
         if (i > -1) outputCbs.current[terminalId].splice(i, 1);
         if (idle) clearTimeout(idle);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
         const hasErr = errorRe.some((r) => r.test(buf));
         const codeMatch = buf.match(/exit code: (\d+)/i);
         const code = codeMatch ? parseInt(codeMatch[1], 10) : hasErr ? 1 : 0;
@@ -287,7 +313,7 @@ const Terminal = () => {
       const checkIdle = () => {
         if (!outputSince) { finish(); return; }
         outputSince = false;
-        idle = setTimeout(checkIdle, 500);
+        idle = setTimeout(checkIdle, idleMs);
       };
 
       const cb = (chunk: string) => {
@@ -295,19 +321,22 @@ const Terminal = () => {
         outputSince = true;
         if (idle) clearTimeout(idle);
         if (promptRe.some((r) => r.test(buf))) { finish(); return; }
-        idle = setTimeout(checkIdle, 500);
+        idle = setTimeout(checkIdle, idleMs);
       };
 
       if (!outputCbs.current[terminalId]) outputCbs.current[terminalId] = [];
       outputCbs.current[terminalId].push(cb);
 
       // Safety timeout
-      setTimeout(() => {
+      timeoutHandle = setTimeout(() => {
         const i = (outputCbs.current[terminalId] ?? []).indexOf(cb);
-        if (i > -1) { outputCbs.current[terminalId].splice(i, 1); finish(); }
-      }, 10000);
+        if (i > -1) {
+          outputCbs.current[terminalId].splice(i, 1);
+        }
+        finish();
+      }, timeoutMs);
 
-      idle = setTimeout(checkIdle, 500);
+      idle = setTimeout(checkIdle, idleMs);
 
       if (command === "^C" || command === "CTRL+C" || command === "CTRL_C") {
         writer.write("\x03");
@@ -370,8 +399,10 @@ const Terminal = () => {
       }
     };
 
-    window.executeTerminalCommand = (cmd) => execInTerminal("terminal-1", cmd);
-    window.executeClaudeCommand = (cmd) => execInTerminal("claude-code", cmd);
+    window.executeTerminalCommand = (cmd, options) =>
+      execInTerminal("terminal-1", cmd, options);
+    window.executeClaudeCommand = (cmd, options) =>
+      execInTerminal("claude-code", cmd, options);
 
     window.terminalInterrupt = async () => {
       if (window.executeTerminalCommand) {

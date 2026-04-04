@@ -119,34 +119,44 @@ const WebRuntimeManager = () => {
       }
 
       const nextSequence = (async () => {
+        serverRequestedRef.current = true;
+        runtimeSourceRef.current = source;
+        lastStartedPackageJsonRef.current = packageJson;
+
         if (restart) {
           await writeToPrimaryTerminal("\u0003");
           await new Promise((resolve) => window.setTimeout(resolve, 250));
         }
 
-        await writeToPrimaryTerminal("echo 'legacy-peer-deps=true' > ~/.npmrc\n");
         await writeToPrimaryTerminal(
-          "echo 'fetch-retry-mintimeout=20000' >> ~/.npmrc\n",
+          "echo 'legacy-peer-deps=true' > ~/.npmrc && " +
+            "echo 'fetch-retry-mintimeout=20000' >> ~/.npmrc && " +
+            "echo 'fetch-retry-maxtimeout=120000' >> ~/.npmrc && " +
+            "npm install --legacy-peer-deps --prefer-offline --no-update-notifier && " +
+            "npm run dev\n",
         );
-        await writeToPrimaryTerminal(
-          "echo 'fetch-retry-maxtimeout=120000' >> ~/.npmrc\n",
-        );
-        await writeToPrimaryTerminal(
-          "npm install --legacy-peer-deps --prefer-offline --no-update-notifier && npm run dev\n",
-        );
-
-        serverRequestedRef.current = true;
-        runtimeSourceRef.current = source;
-        lastStartedPackageJsonRef.current = packageJson;
       })();
 
-      startSequenceRef.current = nextSequence.finally(() => {
-        if (startSequenceRef.current === nextSequence) {
-          startSequenceRef.current = null;
-        }
-      });
+      const nextSequencePromise = nextSequence
+        .catch((error) => {
+          serverRequestedRef.current = false;
+          runtimeSourceRef.current = null;
+          lastStartedPackageJsonRef.current = null;
+          throw error;
+        })
+        .finally(() => {
+          if (startSequenceRef.current === nextSequencePromise) {
+            startSequenceRef.current = null;
+          }
+        });
 
-      await startSequenceRef.current;
+      startSequenceRef.current = nextSequencePromise;
+
+      if (!nextSequencePromise) {
+        return;
+      }
+
+      await nextSequencePromise;
     },
     [writeToPrimaryTerminal],
   );

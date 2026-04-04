@@ -75,7 +75,7 @@ const Keyboard: NextPage = () => {
     selectedBlock,
     previewRuntime,
   } = useSelector((state: RootState) => state.projectOptions);
-  const { imageURLs, plan } = useSelector((state: RootState) => state.basicData);
+  const { plan } = useSelector((state: RootState) => state.basicData);
   const { chatId } = useSelector((state: RootState) => state.messagesprovider);
   const { data: projectFilesData } = useSelector(
     (state: RootState) => state.projectFiles
@@ -318,7 +318,6 @@ const Keyboard: NextPage = () => {
     },
     [
       message,
-      imageURLs,
       dispatch,
       promptCount,
       getProjectId,
@@ -356,7 +355,13 @@ const Keyboard: NextPage = () => {
 
       // Limit to 2 attachments
       if (attachments.length >= 2) {
-        alert("You can only attach up to 2 files");
+        dispatch(
+          setNotification({
+            modalOpen: true,
+            status: "error",
+            text: "You can only attach up to 2 images.",
+          })
+        );
         return;
       }
 
@@ -372,20 +377,27 @@ const Keyboard: NextPage = () => {
       ];
       const isValidType = validImageTypes.includes(newFile.type);
 
-      if (!isValidType && attachments.length < 2) {
-        alert("Please upload only images.");
+      if (!isValidType) {
+        dispatch(
+          setNotification({
+            modalOpen: true,
+            status: "error",
+            text: "Please upload only images.",
+          })
+        );
         return;
       }
 
       // Generate a unique file name
       const uniqueFileName = `upload_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+      const filePreview = URL.createObjectURL(newFile);
 
       // Show loading state
       setAttachments((prev) => [
         ...prev,
         {
           file: newFile,
-          preview: "",
+          preview: filePreview,
           type: "image",
           isUploading: true,
           name: uniqueFileName,
@@ -397,11 +409,15 @@ const Keyboard: NextPage = () => {
 
       const uploadedUrl = await uploadAttachment(newFile, uniqueFileName);
       if (!uploadedUrl) {
+        URL.revokeObjectURL(filePreview);
+        setAttachments((prev) =>
+          prev.filter((att) => att.id !== uniqueFileName)
+        );
         dispatch(
           setNotification({
             modalOpen: true,
             status: "error",
-            text: "Error uploading!",
+            text: "Failed to upload image. Please try again.",
           })
         );
         return;
@@ -413,13 +429,10 @@ const Keyboard: NextPage = () => {
       const base64Image = await encodeImageToBase64(newFile);
       dispatch(addImage(base64Image));
 
-      // Create preview URL
-      const filePreview = URL.createObjectURL(newFile);
-
       // Update attachment list (remove loading state & add URL)
       setAttachments((prev) =>
         prev.map((att) =>
-          att.file === newFile
+          att.id === uniqueFileName
             ? {
                 ...att,
                 preview: filePreview,
@@ -431,6 +444,13 @@ const Keyboard: NextPage = () => {
       );
     } catch (error) {
       console.error("File upload error:", error);
+      dispatch(
+        setNotification({
+          modalOpen: true,
+          status: "error",
+          text: "Failed to upload image. Please try again.",
+        })
+      );
     } finally {
       // Reset file input
       e.target.value = "";
@@ -477,12 +497,13 @@ const Keyboard: NextPage = () => {
       return url;
     } catch (error) {
       console.error("Upload failed:", error);
-      throw new Error("Failed to upload attachment");
+      return "";
     }
   };
 
   const handleAttachClick = () => {
     if (fileInputRef.current) {
+      fileInputRef.current.value = "";
       fileInputRef.current.click();
     }
   };
@@ -693,7 +714,6 @@ const Keyboard: NextPage = () => {
               {/* Attach Icon */}
               <button
                 onClick={handleAttachClick}
-                disabled={!!isStreamActive}
                 type="button"
                 className="cursor-pointer p-2 rounded-md text-xs font-sans font-medium gap-x-1 flex justify-center items-center transition-colors text-[#b1b1b1] hover:bg-[#2a292c]"
                 title="Attach image"
