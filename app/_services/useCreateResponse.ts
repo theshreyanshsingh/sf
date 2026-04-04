@@ -25,9 +25,11 @@ import { updateTodosFromTool } from "../redux/reducers/todosSlice";
 import {
   setFetchedProjectData,
   updateSpecificFile,
+  updateSpecificFilesBatch,
 } from "../redux/reducers/projectFiles";
 import type { AttachmentType } from "../../app/_components/AttachmentPreview";
 import { useEffect, useRef } from "react";
+import { useSession } from "next-auth/react";
 import {
   extractFileWritesFromToolResult,
   extractFileWritesFromSnapshot,
@@ -41,8 +43,18 @@ import {
   DEFAULT_PREVIEW_SNACK_DEPENDENCIES,
   DEFAULT_PREVIEW_SNACK_FILES,
 } from "@/default/mobile";
-import { syncFiles } from "@/app/helpers/webcontainer";
-const schedulePostStreamCommands = async () => false;
+const schedulePostStreamCommands = async (packageJsonPath?: string | null) => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("SB_WEB_RUNTIME_RETRY", {
+        detail: {
+          packageJsonPath: packageJsonPath || null,
+        },
+      }),
+    );
+  }
+  return true;
+};
 const normalizeFileContent = (v: unknown): string =>
   typeof v === "string" ? v : JSON.stringify(v ?? "", null, 2);
 import {
@@ -53,14 +65,19 @@ import {
   resolvePreviewRuntimeFromRecord,
 } from "@/app/helpers/previewRuntime";
 import { normalizeWebProjectPath } from "@/app/helpers/workspacePaths";
+import { fetchProjectSnapshot } from "@/app/helpers/fetchProjectSnapshot";
 
 export const useCreateResponse = () => {
   const dispatch = useDispatch<AppDispatch>();
+  const { data: session } = useSession();
   const previewSnackDependencies = useSelector(
     (state: RootState) => state.projectOptions.previewSnackDependencies,
   );
   const previewRuntime = useSelector(
     (state: RootState) => state.projectOptions.previewRuntime,
+  );
+  const currentProjectId = useSelector(
+    (state: RootState) => state.projectOptions.projectId,
   );
   const activeChatId = useSelector(
     (state: RootState) => state.messagesprovider.chatId,
@@ -244,94 +261,6 @@ export const useCreateResponse = () => {
     return next;
   };
 
-  const handleFileUpdate = async (
-    filePath: string,
-    content: any,
-    skipInstall: boolean = false,
-  ) => {
-    let fileContent = content;
-    if (typeof content === "object" && content !== null) {
-      if ("code" in content && typeof content.code === "string") {
-        fileContent = content.code;
-      } else if ("content" in content && typeof content.content === "string") {
-        fileContent = content.content;
-      } else if (
-        "contents" in content &&
-        typeof content.contents === "string"
-      ) {
-        fileContent = content.contents;
-      } else {
-        fileContent = JSON.stringify(content, null, 2);
-      }
-    }
-
-    if (typeof fileContent === "string") {
-      fileContent = normalizeIncomingFileContent(fileContent);
-
-      const normalizedPath =
-        previewRuntimeRef.current === "web"
-          ? normalizeWebProjectPath(filePath)
-          : filePath.replace(/^\/+/, "");
-
-      // Only update if we have a valid path
-      if (normalizedPath) {
-        const previewPath = normalizeWorkspacePathForSnack(normalizedPath);
-        const sanitizedPreviewContent = sanitizeFileWriteContent(
-          previewPath,
-          fileContent,
-        );
-        const fileWrites = [
-          {
-            path: previewPath,
-            content: sanitizedPreviewContent,
-          },
-        ];
-        const dependencyUpdates = resolveDependencyUpdatesForWrites({
-          fileWrites,
-          currentDependencies: previewSnackDependenciesRef.current,
-          allowRemovals: false,
-        });
-        const shouldUseMobileRuntime = previewRuntimeRef.current === "mobile";
-        debugWc("handleFileUpdate", {
-          normalizedPath,
-          previewPath,
-          previewRuntime: previewRuntimeRef.current,
-          shouldUseMobileRuntime,
-          dependencyUpdates: Object.keys(dependencyUpdates || {}).length,
-        });
-
-        const contentForStorage =
-          shouldUseMobileRuntime
-            ? sanitizedPreviewContent
-            : (fileContent as string);
-
-        dispatch(
-          updateSpecificFile({
-            filePath: normalizedPath,
-            content: contentForStorage,
-            createDirectories: true,
-          }),
-        );
-
-        if (shouldUseMobileRuntime) {
-          debugWc("handleFileUpdate -> mobile write", {
-            previewPath,
-          });
-          dispatch(
-            updatePreviewSnackFiles({
-              [previewPath]: sanitizedPreviewContent,
-            }),
-          );
-          applyPreviewDependencyUpdates(dependencyUpdates);
-        } else {
-          debugWc("handleFileUpdate -> web runtime update queued", {
-            normalizedPath,
-          });
-        }
-      }
-    }
-  };
-
   const applyIncomingWrites = async (
     writes: Array<{ path: string; content: string }>,
     toolContext?: unknown,
@@ -367,17 +296,72 @@ export const useCreateResponse = () => {
     });
 
     let updatedPackageJsonPath: string | null = null;
+    const batchedProjectUpdates: Array<{ filePath: string; content: string }> =
+      [];
+    const batchedPreviewUpdates: Record<string, string> = {};
+
     for (const write of dedupedWrites) {
       const isPackageJson = write.path.toLowerCase().endsWith("package.json");
       if (isPackageJson) {
         updatedPackageJsonPath = write.path;
       }
-      await handleFileUpdate(write.path, write.content, isPackageJson);
+
+      const normalizedContent = normalizeIncomingFileContent(write.content);
+      const normalizedPath =
+        previewRuntimeRef.current === "web"
+          ? normalizeWebProjectPath(write.path)
+          : write.path.replace(/^\/+/, "");
+
+      if (!normalizedPath) continue;
+
+      const previewPath = normalizeWorkspacePathForSnack(normalizedPath);
+      const sanitizedPreviewContent = sanitizeFileWriteContent(
+        previewPath,
+        normalizedContent,
+      );
+      const shouldUseMobileRuntime = previewRuntimeRef.current === "mobile";
+      const contentForStorage = shouldUseMobileRuntime
+        ? sanitizedPreviewContent
+        : normalizedContent;
+
+      batchedProjectUpdates.push({
+        filePath: normalizedPath,
+        content: contentForStorage,
+      });
+
+      if (shouldUseMobileRuntime) {
+        batchedPreviewUpdates[previewPath] = sanitizedPreviewContent;
+      }
     }
 
-    syncFiles(buildFileMapFromWrites(dedupedWrites)).catch((err) =>
-      console.warn("[webcontainer] syncFiles failed:", err),
-    );
+    if (batchedProjectUpdates.length > 0) {
+      if (batchedProjectUpdates.length === 1) {
+        const [singleUpdate] = batchedProjectUpdates;
+        dispatch(
+          updateSpecificFile({
+            filePath: singleUpdate.filePath,
+            content: singleUpdate.content,
+            createDirectories: true,
+          }),
+        );
+      } else {
+        dispatch(
+          updateSpecificFilesBatch(
+            batchedProjectUpdates.map((update) => ({
+              ...update,
+              createDirectories: true,
+            })),
+          ),
+        );
+      }
+    }
+
+    if (
+      previewRuntimeRef.current === "mobile" &&
+      Object.keys(batchedPreviewUpdates).length > 0
+    ) {
+      dispatch(updatePreviewSnackFiles(batchedPreviewUpdates));
+    }
 
     if (toolContext && previewRuntimeRef.current === "mobile") {
       const backendDependencyUpdates = resolveDependencyUpdatesForWrites({
@@ -398,9 +382,13 @@ export const useCreateResponse = () => {
   const hydrateFromCodeUrl = async ({
     codeUrl,
     hydratedCodeUrls,
+    projectId,
+    email,
   }: {
     codeUrl?: string | null;
     hydratedCodeUrls: Set<string>;
+    projectId?: string | null;
+    email?: string | null;
   }): Promise<{ writesCount: number; packageJsonPath: string | null }> => {
     const normalizedCodeUrl = codeUrl?.trim();
     if (!normalizedCodeUrl) {
@@ -413,16 +401,18 @@ export const useCreateResponse = () => {
     hydratedCodeUrls.add(normalizedCodeUrl);
 
     try {
-      debugWc("hydrateFromCodeUrl", { codeUrl: normalizedCodeUrl });
-      const codeResponse = await fetch(normalizedCodeUrl, {
-        cache: "no-store",
-      });
-      if (!codeResponse.ok) {
-        console.error("Failed to fetch code snapshot:", normalizedCodeUrl);
+      const resolvedProjectId = projectId?.trim() || currentProjectId?.trim();
+      const resolvedEmail = email?.trim() || session?.user?.email?.trim();
+      if (!resolvedProjectId || !resolvedEmail) {
+        console.warn("Skipping code snapshot hydration: missing project context.");
         return { writesCount: 0, packageJsonPath: null };
       }
-
-      const snapshot = await codeResponse.json();
+      debugWc("hydrateFromCodeUrl", { codeUrl: normalizedCodeUrl });
+      const snapshot = await fetchProjectSnapshot({
+        projectId: resolvedProjectId,
+        userEmail: resolvedEmail,
+        codeUrl: normalizedCodeUrl,
+      });
       const writes = dedupeFileWrites(
         extractFileWritesFromSnapshot(snapshot),
       );
@@ -459,6 +449,8 @@ export const useCreateResponse = () => {
     return await hydrateFromCodeUrl({
       codeUrl: snapshotUrl,
       hydratedCodeUrls: new Set<string>(),
+      projectId,
+      email,
     });
   };
 

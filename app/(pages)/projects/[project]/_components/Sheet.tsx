@@ -15,8 +15,13 @@ import CodeEditor from "./v1/Editor/CodeEditor";
 import Preview from "./v1/Preview";
 import MobilePreviewSnack from "./mobile/MobilePreviewSnack";
 import Terminal from "./v1/Terminal";
+import WebRuntimeManager from "./v1/WebRuntimeManager";
 import PagesManager from "./v1/PagesManager";
 import { useResponse } from "@/app/_services/useResponse";
+import {
+  ensureProjectCompletionNotificationPreference,
+  getProjectCompletionNotificationEnabled,
+} from "@/app/helpers/notificationPreferences";
 import { useDispatch, useSelector } from "react-redux";
 import { setCurrentFile } from "@/app/redux/reducers/projectFiles";
 // import Grape from "./v1/Editor/Grape";
@@ -27,10 +32,14 @@ const Sheet: NextPage = () => {
     previewRuntime,
     url,
     isResponseCompleted,
+    isStreamActive,
     enh_prompt,
     generationSuccess,
   } = useSelector((state: RootState) => state.projectOptions);
   const isMobilePreviewRuntime = previewRuntime === "mobile";
+  const showWebWorkspaceShell =
+    !isMobilePreviewRuntime &&
+    (generationSuccess === "success" || generationSuccess === "thinking");
 
   const { data: projectData, currentFile } = useSelector(
     (state: RootState) => state.projectFiles,
@@ -53,6 +62,8 @@ const Sheet: NextPage = () => {
   const fetchInFlightRef = useRef(false);
   const loadSequenceRef = useRef(0);
   const fetchCodeFallbackRef = useRef(false);
+  const previousStreamActiveRef = useRef<boolean>(false);
+  const streamFinishAudioRef = useRef<HTMLAudioElement | null>(null);
   const [, setRenderTick] = React.useState(0);
   const rerenderTimersRef = useRef<number[]>([]);
 
@@ -80,6 +91,44 @@ const Sheet: NextPage = () => {
       clearRerenderTimers();
     };
   }, [clearRerenderTimers]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    ensureProjectCompletionNotificationPreference();
+
+    const audio = new Audio("/stream-finish.mp3");
+    audio.preload = "auto";
+    streamFinishAudioRef.current = audio;
+
+    return () => {
+      streamFinishAudioRef.current?.pause();
+      streamFinishAudioRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const wasStreaming = previousStreamActiveRef.current;
+    const isStreamingNow = Boolean(isStreamActive);
+
+    if (wasStreaming && !isStreamingNow) {
+      if (!getProjectCompletionNotificationEnabled()) {
+        previousStreamActiveRef.current = isStreamingNow;
+        return;
+      }
+
+      const audio = streamFinishAudioRef.current;
+      if (audio) {
+        audio.pause();
+        audio.currentTime = 0;
+        void audio.play().catch((error) => {
+          console.warn("Failed to play stream finish tone:", error);
+        });
+      }
+    }
+
+    previousStreamActiveRef.current = isStreamingNow;
+  }, [isStreamActive]);
 
   const isBootstrapProjectData = useCallback((data: object | null): boolean => {
     if (!data || typeof data !== "object") return false;
@@ -245,6 +294,7 @@ const Sheet: NextPage = () => {
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-[#121214]">
+      {!isMobilePreviewRuntime && <WebRuntimeManager />}
       {/* <Header /> */}
 
       {!isResponseCompleted && generationSuccess === null && enh_prompt && (
@@ -252,9 +302,9 @@ const Sheet: NextPage = () => {
       )}
 
       <AnimatePresence mode="wait">
-        {generationSuccess === "success" && (
+        {showWebWorkspaceShell && (
           <motion.div
-            key="success"
+            key="workspace"
             className="h-full min-h-0 w-full"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -262,7 +312,7 @@ const Sheet: NextPage = () => {
             transition={{ duration: 0.1 }}
           >
             <div className="h-full min-h-0 w-full ">
-              <div className="h-full min-h-0 w-full md:h-full">
+              <div className="relative h-full min-h-0 w-full md:h-full">
                 {/* Edit Mode Content */}
                 <motion.div
                   className="flex h-full min-h-0 flex-col"
@@ -395,24 +445,24 @@ const Sheet: NextPage = () => {
                   <PagesManager />
                 </motion.div>
 
-                {/* Split Mode Content */}
-                <motion.div
-                  className="h-full w-full flex "
-                  animate={{
-                    opacity: mode === "split" ? 1 : 0,
-                    display: mode === "split" ? "flex" : "none", // Optional: hide completely
-                  }}
-                  initial={false}
-                  transition={{ duration: 0.1 }}
-                >
-                  <Terminal />
-                </motion.div>
+                {!isMobilePreviewRuntime && (
+                  <div
+                    aria-hidden={mode !== "split"}
+                    className={`absolute inset-0 transition-opacity duration-100 ${
+                      mode === "split"
+                        ? "z-20 opacity-100 pointer-events-auto"
+                        : "z-0 opacity-0 pointer-events-none"
+                    }`}
+                  >
+                    <Terminal />
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>
         )}
 
-        {generationSuccess === "thinking" && (
+        {!showWebWorkspaceShell && generationSuccess === "thinking" && (
           <motion.div
             key="thinking"
             initial={{ opacity: 0 }}

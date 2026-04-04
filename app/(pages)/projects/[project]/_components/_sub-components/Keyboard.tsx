@@ -23,7 +23,7 @@ import { BsArrowUp } from "react-icons/bs";
 import { FaPaperclip, FaChevronDown } from "react-icons/fa6";
 import { LuLoaderCircle } from "react-icons/lu";
 import { useDispatch, useSelector } from "react-redux";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { usePathname } from "next/navigation";
 import { RxLightningBolt } from "react-icons/rx";
 import { Meteors } from "@/components/magicui/meteors";
@@ -395,8 +395,7 @@ const Keyboard: NextPage = () => {
         },
       ]);
 
-      // Upload to S3 or server
-      const uploadedUrl = await getPresignedUrl(newFile, uniqueFileName);
+      const uploadedUrl = await uploadAttachment(newFile, uniqueFileName);
       if (!uploadedUrl) {
         dispatch(
           setNotification({
@@ -457,29 +456,28 @@ const Keyboard: NextPage = () => {
     });
   };
 
-  const getPresignedUrl = async (file: File, name: string): Promise<string> => {
+  const uploadAttachment = async (file: File, name: string): Promise<string> => {
     try {
-      const response = await fetch(`${API}/get-presigned-url`, {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("fileName", name);
+      formData.append("email", email.value || "");
+
+      const response = await fetch(`${API}/upload-attachment`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileName: name,
-          fileType: file.type,
-          email: email.value,
-        }),
+        body: formData,
       });
 
-      const { uploadURL, url } = await response.json();
-      await fetch(uploadURL, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type },
-      });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const { url } = await response.json();
 
       return url;
     } catch (error) {
       console.error("Upload failed:", error);
-      throw new Error("Failed to get presigned URL");
+      throw new Error("Failed to upload attachment");
     }
   };
 
@@ -521,6 +519,23 @@ const Keyboard: NextPage = () => {
           </p>
         </div>
       )}
+      <AnimatePresence initial={false}>
+        {isStreamActive && (
+          <motion.div
+            key="agent-building-status"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="flex w-full items-center gap-2 rounded-lg border border-[#2a2a2b] bg-[#17171a] px-3 py-2 text-xs text-[#d5d7df]"
+          >
+            <LuLoaderCircle className="shrink-0 animate-spin text-sm text-[#4a90e2]" />
+            <span className="truncate font-sans font-medium">
+              Agent is building
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Main Input Container */}
       <div className=" relative rounded-lg flex flex-col items-start justify-center shadow-lg min-h-[120px] w-full ">
         {/* Attachment Preview */}

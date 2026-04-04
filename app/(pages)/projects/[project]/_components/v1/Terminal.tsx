@@ -1,17 +1,15 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
-import { boot, getContainer, fetchAndMountTestFiles, onServerReady, syncFiles } from "@/app/helpers/webcontainer";
-import { useDispatch, useSelector } from "react-redux";
-import { RootState, store } from "@/app/redux/store";
+import { boot, getContainer, onServerReady } from "@/app/helpers/webcontainer";
+import { useDispatch } from "react-redux";
 import { setPreviewUrl } from "@/app/redux/reducers/projectOptions";
 import { IoClose } from "react-icons/io5";
 import { LuLoader } from "react-icons/lu";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { WebContainerProcess } from "@webcontainer/api";
-import { normalizeWebProjectFiles } from "@/app/helpers/normalizeWebProjectFiles";
 
 declare global {
   interface Window {
@@ -20,6 +18,7 @@ declare global {
     waitForTerminalReady: (terminalId: string, timeout?: number) => Promise<boolean>;
     removeTerminal: (terminalId: string) => boolean;
     getTerminalList: () => string[];
+    writeTerminalInput?: (terminalId: string, input: string) => Promise<boolean>;
     executeTerminalCommand?: (command: string) => Promise<{ success: boolean; output: string }>;
     executeClaudeCommand?: (command: string) => Promise<{ success: boolean; output: string }>;
     terminalInterrupt: () => Promise<boolean>;
@@ -54,19 +53,9 @@ const XTERM_THEME = {
 
 const Terminal = () => {
   const dispatch = useDispatch();
-  const projectFilesData = useSelector(
-    (state: RootState) => state.projectFiles.data,
-  );
   const [bootState, setBootState] = useState<BootState>("idle");
   const [terminals, setTerminals] = useState<string[]>(["terminal-1"]);
   const [activeTerminal, setActiveTerminal] = useState("terminal-1");
-  const normalizedProjectFiles = useMemo(
-    () =>
-      normalizeWebProjectFiles(
-        (projectFilesData as Record<string, unknown> | null | undefined) ?? null,
-      ).files,
-    [projectFilesData],
-  );
 
   const terminalsRef = useRef(["terminal-1"]);
   const activeTerminalRef = useRef("terminal-1");
@@ -86,19 +75,24 @@ const Terminal = () => {
   /*  Boot WebContainer once                                       */
   /* ------------------------------------------------------------ */
 
-  const setupDoneRef = useRef(false);
-  const lastProjectSyncSignatureRef = useRef("");
-
   useEffect(() => {
     if (bootState !== "idle") return;
     setBootState("booting");
+    let unregisterServerReady: (() => void) | null = null;
 
     boot()
       .then(() => {
-        onServerReady((_port, url) => dispatch(setPreviewUrl(url)));
+        return onServerReady((_port, url) => dispatch(setPreviewUrl(url)));
+      })
+      .then((unsubscribe) => {
+        unregisterServerReady = unsubscribe;
         setBootState("ready");
       })
       .catch(() => setBootState("error"));
+
+    return () => {
+      unregisterServerReady?.();
+    };
   }, [bootState, dispatch]);
 
   /* ------------------------------------------------------------ */
@@ -155,6 +149,9 @@ const Terminal = () => {
 
     const writer = shell.input.getWriter();
     writerRef.current[id] = writer;
+    if (id === "terminal-1" && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("SB_PRIMARY_TERMINAL_READY"));
+    }
 
     term.onData((data) => writer.write(data));
     term.onResize(({ cols, rows }) => shell.resize({ cols, rows }));
@@ -178,76 +175,7 @@ const Terminal = () => {
       } catch { /* stream closed */ }
     })();
 
-    // Auto-setup: mount test files → overlay API project files → npm install → dev server
-    if (id === "terminal-1" && !setupDoneRef.current) {
-      setupDoneRef.current = true;
-      (async () => {
-        const waitForInitialProjectFiles = async (
-          timeoutMs = 2000,
-          intervalMs = 100,
-        ) => {
-          const startedAt = Date.now();
-          while (Date.now() - startedAt < timeoutMs) {
-            const snapshot = normalizeWebProjectFiles(
-              (store.getState().projectFiles.data as
-                | Record<string, unknown>
-                | null
-                | undefined) ?? null,
-            ).files;
-            if (Object.keys(snapshot).length > 0) {
-              return snapshot;
-            }
-            await new Promise((resolve) => setTimeout(resolve, intervalMs));
-          }
-          return {};
-        };
-
-        const initialProjectFiles = await waitForInitialProjectFiles();
-        let testFiles: Record<string, string> | null = null;
-
-        if (!initialProjectFiles["package.json"]) {
-          testFiles = await fetchAndMountTestFiles();
-        }
-
-        if (Object.keys(initialProjectFiles).length > 0) {
-          await syncFiles(initialProjectFiles);
-        }
-
-        const hasPackageJson =
-          initialProjectFiles["package.json"] ||
-          (testFiles && testFiles["package.json"]);
-
-        if (hasPackageJson) {
-          await new Promise((r) => setTimeout(r, 800));
-          writer.write("echo 'legacy-peer-deps=true' > ~/.npmrc\n");
-          await new Promise((r) => setTimeout(r, 300));
-          writer.write("echo 'fetch-retry-mintimeout=20000' >> ~/.npmrc\n");
-          await new Promise((r) => setTimeout(r, 300));
-          writer.write("echo 'fetch-retry-maxtimeout=120000' >> ~/.npmrc\n");
-          await new Promise((r) => setTimeout(r, 300));
-          writer.write("npm install --legacy-peer-deps --prefer-offline --no-update-notifier && npm run dev\n");
-        }
-      })().catch((err) => console.error("[terminal] auto-setup failed:", err));
-    }
   }, []);
-
-  useEffect(() => {
-    if (bootState !== "ready") return;
-    const fileKeys = Object.keys(normalizedProjectFiles);
-    if (fileKeys.length === 0) return;
-
-    const signature = fileKeys
-      .sort()
-      .map((key) => `${key}:${normalizedProjectFiles[key]?.length ?? 0}`)
-      .join("|");
-
-    if (lastProjectSyncSignatureRef.current === signature) return;
-    lastProjectSyncSignatureRef.current = signature;
-
-    syncFiles(normalizedProjectFiles).catch((err) =>
-      console.warn("[terminal] project file sync failed:", err),
-    );
-  }, [bootState, normalizedProjectFiles]);
 
   /* ------------------------------------------------------------ */
   /*  Init first terminal once container is ready                  */
@@ -429,6 +357,17 @@ const Terminal = () => {
       initedRef.current.delete(id);
       delete terminalNamesRef.current[id];
       return true;
+    };
+
+    window.writeTerminalInput = async (terminalId, input) => {
+      const writer = writerRef.current[terminalId];
+      if (!writer) return false;
+      try {
+        await writer.write(input);
+        return true;
+      } catch {
+        return false;
+      }
     };
 
     window.executeTerminalCommand = (cmd) => execInTerminal("terminal-1", cmd);

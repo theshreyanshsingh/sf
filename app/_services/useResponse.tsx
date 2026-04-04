@@ -2,6 +2,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { AppDispatch, RootState } from "../redux/store";
 
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 
 import {
   setGenerating,
@@ -26,15 +27,18 @@ import {
   dedupeFileWrites,
   normalizeIncomingFileContent,
 } from "./fileUpdatesMobile";
-import { syncFiles } from "@/app/helpers/webcontainer";
+import { fetchProjectSnapshot } from "@/app/helpers/fetchProjectSnapshot";
 
 export const useResponse = () => {
   const dispatch = useDispatch<AppDispatch>();
+  const { data: session } = useSession();
 
   const { framework, previewRuntime, isStreamActive, projectId } = useSelector(
     (state: RootState) => state.projectOptions,
   );
-  const { data } = useSelector((state: RootState) => state.projectFiles); //files
+  const { data: projectFilesData } = useSelector(
+    (state: RootState) => state.projectFiles,
+  ); //files
   const { images } = useSelector((state: RootState) => state.basicData);
 
   const shouldDebugWebContainerWrites = () =>
@@ -397,13 +401,12 @@ export const useResponse = () => {
 
         dispatch(setprojectData({ ...normalizedFiles }));
 
-        syncFiles(normalizedFiles as Record<string, string>).catch((err) =>
-          console.warn("[webcontainer] syncFiles failed:", err),
-        );
-
         saveMoreDatatoProject({
-          data: JSON.stringify({ ...data, ...normalizedFiles }),
-          email: email || "",
+          data: JSON.stringify({
+            ...(projectFilesData as Record<string, unknown>),
+            ...normalizedFiles,
+          }),
+          email: session?.user?.email || "",
           projectId: projectId || "",
         });
 
@@ -555,11 +558,19 @@ export const useResponse = () => {
     return {};
   };
 
-  const fetchProjectFiles = async (data: {
+  const fetchProjectFiles = async (request: {
     url: string;
   }): Promise<Record<string, any> | null> => {
     try {
-      debugWc("fetchProjectFiles request", { url: data.url });
+      debugWc("fetchProjectFiles request", { url: request.url });
+      const userEmail = session?.user?.email?.trim();
+      if (!projectId || !userEmail) {
+        debugWc("fetchProjectFiles skipped: missing auth context", {
+          hasProjectId: !!projectId,
+          hasUserEmail: !!userEmail,
+        });
+        return null;
+      }
       dispatch(
         setGenerating({
           generating: true,
@@ -567,108 +578,87 @@ export const useResponse = () => {
           isResponseCompleted: true,
         }),
       );
-      const response = await fetch(data.url, {
-        method: "GET",
-        mode: "cors",
-        headers: {
-          "Content-Type": "application/json",
-        },
+      const responseData = await fetchProjectSnapshot({
+        projectId,
+        userEmail,
+        codeUrl: request.url,
+      });
+      const rawFiles =
+        responseData.initialCode ||
+        responseData.data ||
+        responseData.generatedFiles ||
+        responseData;
+      const snapshotWrites = dedupeFileWrites(
+        extractFileWritesFromSnapshot(rawFiles),
+      );
+      const projectFiles =
+        snapshotWrites.length > 0
+          ? snapshotWrites.reduce<Record<string, string>>((acc, write) => {
+              acc[write.path] = write.content;
+              return acc;
+            }, {})
+          : safelyParse(rawFiles);
+      const source = responseData.initialCode
+        ? "initialCode"
+        : responseData.data
+          ? "data"
+          : responseData.generatedFiles
+            ? "generatedFiles"
+            : "root";
+      const projectFilePaths = Object.keys(projectFiles || {});
+      debugWc("fetchProjectFiles snapshot", {
+        source,
+        snapshotWrites: snapshotWrites.length,
+        projectFiles: projectFilePaths.length,
+        hasPackageJson: projectFilePaths.includes("package.json"),
+        firstPaths: projectFilePaths.slice(0, 25),
       });
 
-      if (response.ok) {
-        const responseData = (await response.json()) as Record<string, any>;
+      const shouldNormalize =
+        previewRuntime === "web" ||
+        (!previewRuntime && isLikelyWebProject(projectFiles));
+      const normalizedFiles = shouldNormalize
+        ? normalizeWebProjectFiles(projectFiles).files
+        : projectFiles;
+      const shouldAppendExisting =
+        !isStreamActive &&
+        !!projectFilesData &&
+        typeof projectFilesData === "object" &&
+        Object.keys(projectFilesData as Record<string, unknown>).length > 0;
+      const filesForStore = shouldAppendExisting
+        ? {
+            ...(projectFilesData as Record<string, any>),
+            ...normalizedFiles,
+          }
+        : normalizedFiles;
+      debugWc("fetchProjectFiles normalized", {
+        normalizedCount: Object.keys(normalizedFiles).length,
+        mergedCount: Object.keys(filesForStore).length,
+        appendExisting: shouldAppendExisting,
+      });
 
-        // Extract files from response data if they are nested
-        const rawFiles =
-          responseData.initialCode ||
-          responseData.data ||
-          responseData.generatedFiles ||
-          responseData;
-        const snapshotWrites = dedupeFileWrites(
-          extractFileWritesFromSnapshot(rawFiles),
-        );
-        const projectFiles =
-          snapshotWrites.length > 0
-            ? snapshotWrites.reduce<Record<string, string>>((acc, write) => {
-                acc[write.path] = write.content;
-                return acc;
-              }, {})
-            : safelyParse(rawFiles);
-        const source = responseData.initialCode
-          ? "initialCode"
-          : responseData.data
-            ? "data"
-            : responseData.generatedFiles
-              ? "generatedFiles"
-              : "root";
-        const projectFilePaths = Object.keys(projectFiles || {});
-        debugWc("fetchProjectFiles snapshot", {
-          source,
-          snapshotWrites: snapshotWrites.length,
-          projectFiles: projectFilePaths.length,
-          hasPackageJson: projectFilePaths.includes("package.json"),
-          firstPaths: projectFilePaths.slice(0, 25),
-        });
+      dispatch(setprojectFiles(buildFileTree(filesForStore)));
+      dispatch(setprojectData(filesForStore));
+      dispatch(bumpUrlLoadId());
 
-        const shouldNormalize =
-          previewRuntime === "web" ||
-          (!previewRuntime && isLikelyWebProject(projectFiles));
-        const normalizedFiles = shouldNormalize
-          ? normalizeWebProjectFiles(projectFiles).files
-          : projectFiles;
-        const shouldAppendExisting =
-          !isStreamActive &&
-          !!data &&
-          typeof data === "object" &&
-          Object.keys(data as Record<string, unknown>).length > 0;
-        const filesForStore = shouldAppendExisting
-          ? {
-              ...(data as Record<string, any>),
-              ...normalizedFiles,
-            }
-          : normalizedFiles;
-        debugWc("fetchProjectFiles normalized", {
-          normalizedCount: Object.keys(normalizedFiles).length,
-          mergedCount: Object.keys(filesForStore).length,
-          appendExisting: shouldAppendExisting,
-        });
+      dispatch(setReaderMode(false));
+      dispatch(
+        setGenerating({
+          generating: false,
+          generationSuccess: "success",
+          isResponseCompleted: true,
+        }),
+      );
 
-        dispatch(setprojectFiles(buildFileTree(filesForStore)));
-        dispatch(setprojectData(filesForStore));
-        dispatch(bumpUrlLoadId());
-
-        syncFiles(normalizedFiles as Record<string, string>).catch((err) =>
-          console.warn("[webcontainer] syncFiles failed:", err),
-        );
-        dispatch(setReaderMode(false));
-        dispatch(
-          setGenerating({
-            generating: false,
-            generationSuccess: "success",
-            isResponseCompleted: true,
-          }),
-        );
-
-        // Return the data so it can be used by WebContainer-aware components
-        return normalizedFiles;
-      } else {
-        dispatch(
-          setGenerating({
-            generating: false,
-            generationSuccess: "failed",
-            isResponseCompleted: true,
-          }),
-        );
-        dispatch(
-          setNotification({
-            modalOpen: true,
-            status: "error",
-            text: "Preview is not available at the moment! Please try again.",
-          }),
-        );
-        return null;
-      }
+      return normalizedFiles;
     } catch (error) {
+      dispatch(
+        setGenerating({
+          generating: false,
+          generationSuccess: "failed",
+          isResponseCompleted: true,
+        }),
+      );
       dispatch(
         setNotification({
           modalOpen: true,

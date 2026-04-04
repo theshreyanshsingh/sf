@@ -1,10 +1,9 @@
 "use client";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useAuthenticated } from "@/app/helpers/useAuthenticated";
 import { useSettings } from "@/app/helpers/useSettings";
-import { GoInfo } from "react-icons/go";
 import PricingModal from "@/app/(pages)/_modals/PricingModal";
 import { useDispatch } from "react-redux";
 import { setPricingModalOpen } from "@/app/redux/reducers/basicData";
@@ -13,11 +12,15 @@ import { BsLightningChargeFill } from "react-icons/bs";
 import { setNotification } from "@/app/redux/reducers/NotificationModalReducer";
 import { LuLoaderCircle } from "react-icons/lu";
 import { Meteors } from "@/components/magicui/meteors";
+import {
+  ensureProjectCompletionNotificationPreference,
+  setProjectCompletionNotificationEnabled,
+} from "@/app/helpers/notificationPreferences";
 
 const Page = () => {
-  const [showDeploymentsTooltip, setShowDeploymentsTooltip] = useState(false);
-  const [showProjectsTooltip, setShowProjectsTooltip] = useState(false);
   const [isManaging, setIsManaging] = useState(false);
+  const [playCompletionNotification, setPlayCompletionNotification] =
+    useState(false);
 
   const dispatch = useDispatch();
   const { email } = useAuthenticated();
@@ -36,6 +39,12 @@ const Page = () => {
       : Math.max(0, maxPrompts - promptsUsed);
   const promptUsagePercent =
     maxPrompts > 0 ? Math.min(100, (promptsUsed / maxPrompts) * 100) : 0;
+
+  useEffect(() => {
+    setPlayCompletionNotification(
+      ensureProjectCompletionNotificationPreference(),
+    );
+  }, []);
 
   const formatNumber = (value: number) =>
     new Intl.NumberFormat("en-US").format(value);
@@ -112,6 +121,12 @@ const Page = () => {
     }
   };
 
+  const handleToggleCompletionNotification = () => {
+    const nextValue = !playCompletionNotification;
+    setPlayCompletionNotification(nextValue);
+    setProjectCompletionNotificationEnabled(nextValue);
+  };
+
   return (
     <div className="h-[85vh] bg-[#000000] relative overflow-hidden">
       {/* Blue Gradient Background */}
@@ -157,15 +172,15 @@ const Page = () => {
         </motion.div>
 
         {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(320px,0.95fr)_minmax(0,1.45fr)]">
           {/* User Profile Card */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, delay: 0.1 }}
-            className="lg:col-span-1"
+            className="space-y-6"
           >
-            <div className="bg-[#141415] border border-[#2a2a2b] rounded-xl p-6 backdrop-blur-sm h-full">
+            <div className="bg-[#141415] border border-[#2a2a2b] rounded-xl p-6 backdrop-blur-sm">
               {/* Profile Header */}
               <div className="text-center mb-6">
                 <div className="w-16 h-16 bg-gradient-to-br from-[#4a90e2] to-[#5ba0f2] rounded-full flex items-center justify-center mx-auto mb-4">
@@ -244,91 +259,89 @@ const Page = () => {
                 )
               )}
             </div>
+            <div className="bg-[#141415] border border-[#2a2a2b] rounded-xl p-5 backdrop-blur-sm">
+              <div className="mb-3 space-y-1">
+                <h3 className="text-base font-semibold text-white">
+                  Workspace overview
+                </h3>
+                <p className="text-sm text-[#9E9D9F]">
+                  Track your projects and deployments in one place.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-[#252528] bg-[#19191a] px-4 py-3.5">
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-[#8C8C8C]">
+                    Deployments
+                  </p>
+                  {settingsLoading ? (
+                    <div className="mt-3 h-8 w-16 rounded bg-[#272628] animate-pulse" />
+                  ) : (
+                    <p className="mt-3 text-3xl font-semibold text-white">
+                      {formatNumber(settings?.deployments ?? 0)}
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-[#252528] bg-[#19191a] px-4 py-3.5">
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-[#8C8C8C]">
+                    Projects
+                  </p>
+                  {settingsLoading ? (
+                    <div className="mt-3 h-8 w-16 rounded bg-[#272628] animate-pulse" />
+                  ) : (
+                    <p className="mt-3 text-3xl font-semibold text-white">
+                      {formatNumber(settings?.projectCount ?? 0)}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
           </motion.div>
 
-          {/* Stats and Usage Cards */}
+          {/* Preferences and Billing */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, delay: 0.2 }}
-            className="lg:col-span-2 space-y-6"
+            className="space-y-6"
           >
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Deployments Card */}
-              <div className="bg-[#141415] border border-[#2a2a2b] rounded-xl p-4 backdrop-blur-sm">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-semibold text-white">
-                    Deployments
-                  </h4>
-                  <div
-                    className="cursor-pointer"
-                    onMouseEnter={() => setShowDeploymentsTooltip(true)}
-                    onMouseLeave={() => setShowDeploymentsTooltip(false)}
-                  >
-                    <GoInfo className="text-[#71717A] hover:text-white transition-colors" />
-                    <AnimatePresence>
-                      {showDeploymentsTooltip && (
-                        <motion.div
-                          initial={{ opacity: 0, x: 10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          exit={{ opacity: 0, x: 10 }}
-                          className="absolute left-full ml-2 p-2 bottom-[1px] z-10 bg-[#28272a] rounded-md text-xs text-white whitespace-nowrap"
-                        >
-                          Number of deployments
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </div>
-                {settingsLoading ? (
-                  <div className="h-8 w-16 bg-[#272628] rounded animate-pulse"></div>
-                ) : (
-                  <p className="text-2xl font-bold text-white">
-                    {settings?.deployments ?? 0}
+            <div className="bg-[#141415] border border-[#2a2a2b] rounded-xl p-5 backdrop-blur-sm">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1">
+                  <h3 className="text-base font-semibold text-white">
+                    Project completion notification
+                  </h3>
+                  <p className="text-sm text-[#9E9D9F]">
+                    Play the completion tone when a project finishes building.
                   </p>
-                )}
-              </div>
+                </div>
 
-              {/* Projects Card */}
-              <div className="bg-[#141415] border border-[#2a2a2b] rounded-xl p-4 backdrop-blur-sm">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-semibold text-white">Projects</h4>
-                  <div
-                    className="cursor-pointer"
-                    onMouseEnter={() => setShowProjectsTooltip(true)}
-                    onMouseLeave={() => setShowProjectsTooltip(false)}
-                  >
-                    <GoInfo className="text-[#71717A] hover:text-white transition-colors" />
-                    <AnimatePresence>
-                      {showProjectsTooltip && (
-                        <motion.div
-                          initial={{ opacity: 0, x: 10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          exit={{ opacity: 0, x: 10 }}
-                          className="absolute left-full ml-2 p-2 bottom-[1px] z-10 bg-[#28272a] rounded-md text-xs text-white whitespace-nowrap"
-                        >
-                          Number of active projects
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </div>
-                {settingsLoading ? (
-                  <div className="h-8 w-16 bg-[#272628] rounded animate-pulse"></div>
-                ) : (
-                  <p className="text-2xl font-bold text-white">
-                    {settings?.projectCount ?? 0}
-                  </p>
-                )}
+                <button
+                  type="button"
+                  aria-pressed={playCompletionNotification}
+                  aria-label="Toggle project completion notification"
+                  onClick={handleToggleCompletionNotification}
+                  className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors duration-200 ${
+                    playCompletionNotification
+                      ? "border-[#4a90e2] bg-[#4a90e2]"
+                      : "border-[#303033] bg-[#202022]"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                      playCompletionNotification
+                        ? "translate-x-6"
+                        : "translate-x-1"
+                    }`}
+                  />
+                </button>
               </div>
             </div>
 
-            {/* Usage Card */}
             <div className="bg-[#141415] border border-[#2a2a2b] rounded-xl p-6 backdrop-blur-sm">
               <div className="flex items-center justify-between mb-4">
                 <h4 className="text-lg font-semibold text-white">Usage</h4>
-                <div className="text-right"></div>
               </div>
 
               {!settingsLoading && (
@@ -362,7 +375,6 @@ const Page = () => {
               )}
             </div>
 
-            {/* Billing Card */}
             <div className="bg-[#141415] border border-[#2a2a2b] rounded-xl p-6 backdrop-blur-sm">
               <div className="flex items-center justify-between mb-4">
                 <h4 className="text-lg font-semibold text-white">Billing</h4>

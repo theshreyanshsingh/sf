@@ -94,6 +94,7 @@ import {
   MOBILE_STARTING_POINTS,
   type StartingPoint,
 } from "../config/startingPoints";
+import { ensureProjectCompletionNotificationPreference } from "../helpers/notificationPreferences";
 
 // FAQ Data
 const faqData = [
@@ -272,9 +273,15 @@ const Hero = () => {
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micStartPendingRef = useRef(false);
   const router = useRouter();
 
   const dispatch = useDispatch();
+
+  useEffect(() => {
+    ensureProjectCompletionNotificationPreference();
+  }, []);
 
   // Save selected model to session storage whenever it changes
   useEffect(() => {
@@ -283,6 +290,12 @@ const Hero = () => {
 
   // Initialize speech recognition
   useEffect(() => {
+    const stopMicrophoneStream = () => {
+      if (!micStreamRef.current) return;
+      micStreamRef.current.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
+    };
+
     if (typeof window !== "undefined") {
       const SpeechRecognition =
         window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -294,6 +307,7 @@ const Hero = () => {
         recognition.lang = "en-US";
 
         recognition.onstart = () => {
+          micStartPendingRef.current = false;
           setIsListening(true);
         };
 
@@ -314,6 +328,8 @@ const Hero = () => {
 
         recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
           console.error("Speech recognition error:", event.error);
+          micStartPendingRef.current = false;
+          stopMicrophoneStream();
           if (event.error === "not-allowed") {
             dispatch(
               setNotification({
@@ -335,17 +351,23 @@ const Hero = () => {
         };
 
         recognition.onend = () => {
+          micStartPendingRef.current = false;
+          stopMicrophoneStream();
           setIsListening(false);
         };
 
         recognitionRef.current = recognition;
+      } else {
+        setSpeechSupported(false);
       }
     }
 
     return () => {
+      micStartPendingRef.current = false;
       if (recognitionRef.current) {
         recognitionRef.current.stop();
       }
+      stopMicrophoneStream();
     };
   }, [dispatch]);
 
@@ -423,6 +445,13 @@ const Hero = () => {
     { name: "claude-opus-4.6", display: "Claude Opus 4.6", scale: false },
     { name: "claude-sonnet-4.5", display: "Claude Sonnet 4.5", scale: false },
   ];
+  const selectedModelOption = modelOptions.find(
+    (option) => option.name === selectedModel
+  );
+  const compactModelLabel = (selectedModelOption?.display || selectedModel).replace(
+    /^Claude\s+/i,
+    ""
+  );
   const landingPreviewOptions: Array<{
     name: "web" | "mobile";
     display: string;
@@ -542,20 +571,24 @@ const Hero = () => {
         // Generate a unique file name
         const uniqueFileName = `upload_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 
-        // // Show loading state
-        // setAttachments((prev) => [
-        //   ...prev,
-        //   {
-        //     file: newFile,
-        //     preview: "",
-        //     type: "image",
+        const filePreview = URL.createObjectURL(newFile);
 
-        //     name: uniqueFileName, // Store unique name
-        //   },
-        // ]);
+        // Show loading state
+        setAttachments((prev) => [
+          ...prev,
+          {
+            file: newFile,
+            preview: filePreview,
+            type: "image",
+            isUploading: true,
+            name: uniqueFileName,
+            fileType: newFile.type,
+            url: "",
+            id: uniqueFileName,
+          },
+        ]);
 
-        // Upload to S3 or server
-        const uploadedUrl = await getPresignedUrl(newFile, uniqueFileName);
+        const uploadedUrl = await uploadAttachment(newFile, uniqueFileName);
         if (!uploadedUrl) {
           dispatch(
             setNotification({
@@ -573,9 +606,6 @@ const Hero = () => {
         const base64Image = await encodeImageToBase64(newFile);
         dispatch(addImage(base64Image));
 
-        // Create preview URL
-        const filePreview = URL.createObjectURL(newFile);
-
         // Update attachment list (remove loading state & add URL)
         setAttachments((prev) =>
           prev.map((att) =>
@@ -584,7 +614,7 @@ const Hero = () => {
                   ...att,
                   preview: filePreview,
                   isUploading: false,
-                  uploadedUrl, // Store URL
+                  url: uploadedUrl,
                 }
               : att
           )
@@ -617,32 +647,23 @@ const Hero = () => {
     });
   };
 
-  const getPresignedUrl = async (file: File, name: string): Promise<string> => {
+  const uploadAttachment = async (file: File, name: string): Promise<string> => {
     try {
-      const response = await fetch(`${API}/get-presigned-url`, {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("fileName", name);
+      formData.append("email", email.value || "");
+
+      const response = await fetch(`${API}/upload-attachment`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileName: name,
-          fileType: file.type,
-          email: email.value,
-        }),
+        body: formData,
       });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const { uploadURL, url } = await response.json();
-      const uploadResponse = await fetch(uploadURL, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type },
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error(`Upload failed! status: ${uploadResponse.status}`);
-      }
+      const { url } = await response.json();
 
       return url;
     } catch (error) {
@@ -676,7 +697,7 @@ const Hero = () => {
         })
       );
 
-      throw new Error("Failed to get presigned URL");
+      throw new Error("Failed to upload attachment");
     }
   };
 
@@ -840,14 +861,41 @@ const Hero = () => {
       return;
     }
 
-    if (!recognitionRef.current) return;
+    if (!recognitionRef.current || isListening || micStartPendingRef.current) {
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      dispatch(
+        setNotification({
+          modalOpen: true,
+          status: "error",
+          text: "Microphone access is not available in this browser.",
+        })
+      );
+      return;
+    }
 
     try {
+      micStartPendingRef.current = true;
+
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach((track) => track.stop());
+        micStreamRef.current = null;
+      }
+
       // Request microphone permission
-      await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
       recognitionRef.current.start();
     } catch (error) {
       console.error("Microphone permission error:", error);
+      micStartPendingRef.current = false;
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach((track) => track.stop());
+        micStreamRef.current = null;
+      }
       dispatch(
         setNotification({
           modalOpen: true,
@@ -863,6 +911,8 @@ const Hero = () => {
       recognitionRef.current.stop();
     }
   };
+
+  const hasInputText = input.trim().length > 0;
 
   const startFigmaConnect = () => {
     window.location.href = "/api/figma/oauth";
@@ -904,7 +954,7 @@ const Hero = () => {
       ]);
 
       // Upload to S3 and attach URL
-      const uploadedUrl = await getPresignedUrl(file, uniqueName);
+      const uploadedUrl = await uploadAttachment(file, uniqueName);
       if (!uploadedUrl) throw new Error("Failed to upload Figma image");
 
       dispatch(addImage(data.base64));
@@ -1205,37 +1255,43 @@ const Hero = () => {
       </AnimatePresence>
 
       {/* Hero and Input Section */}
-      <section className="w-full max-w-3xl mx-auto mt-[6%] justify-center items-center flex flex-col">
+      <section className="flex w-full max-w-3xl mx-auto mt-[6%] flex-col items-center justify-center px-4 sm:px-0">
         {/* Introduce  */}
         <motion.div
           initial="hidden"
           animate="visible"
           variants={agentIntroVariants}
-          className="relative text-white rounded-3xl px-2 p-1 flex max-md:mt-[10%] justify-center items-center gap-x-1 border border-[#2a2a2b] bg-stone-50/10 backdrop-blur-3xl overflow-hidden mb-2"
+          className="relative mb-2 flex w-full max-w-full items-center justify-between gap-2 overflow-hidden rounded-2xl border border-[#2a2a2b] bg-stone-50/10 px-3 py-2 text-white backdrop-blur-3xl max-md:mt-[10%] sm:w-auto sm:justify-center sm:rounded-3xl sm:px-2 sm:py-1"
         >
-          <CiMobile1 className="text-lg text-[#4F92E1]" />
-          <span
-            className="relative text-xs sm:text-sm inline-block bg-gradient-to-r from-transparent via-white to-transparent bg-clip-text text-transparent animate-shimmer"
-            style={{
-              backgroundSize: "200% 100%",
-              backgroundImage:
-                "linear-gradient(90deg, rgba(192,192,192,0.7) 0%, rgba(255,255,255,1) 50%, rgba(192,192,192,0.7) 100%)",
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-            }}
-          >
-            <span>Introducing Mobile apps with Superblocks. </span>
-          </span>
+          <div className="flex min-w-0 items-center gap-2">
+            <CiMobile1 className="shrink-0 text-base text-[#4F92E1] sm:text-lg" />
+            <span
+              className="relative min-w-0 truncate whitespace-nowrap bg-gradient-to-r from-transparent via-white to-transparent bg-clip-text text-[11px] text-transparent animate-shimmer sm:text-sm"
+              style={{
+                backgroundSize: "200% 100%",
+                backgroundImage:
+                  "linear-gradient(90deg, rgba(192,192,192,0.7) 0%, rgba(255,255,255,1) 50%, rgba(192,192,192,0.7) 100%)",
+                WebkitBackgroundClip: "text",
+                backgroundClip: "text",
+                color: "transparent",
+              }}
+            >
+              <span className="sm:hidden">Mobile apps in Superblocks.</span>
+              <span className="hidden sm:inline">
+                Introducing mobile apps with Superblocks.
+              </span>
+            </span>
+          </div>
           <button
             type="button"
             onClick={() => {
               setLandingPreview("mobile");
               setPreviewDropdownOpen(false);
             }}
-            className="ml-1 cursor-pointer bg-white text-[#000] text-xs sm:text-sm font-sans px-2 py-1 rounded-xl"
+            className="shrink-0 cursor-pointer rounded-2xl bg-white px-3 py-1.5 text-[11px] font-medium text-[#000] sm:ml-1 sm:px-2 sm:py-1 sm:text-sm"
           >
-            Give it a shot!
+            <span className="sm:hidden">Try mobile</span>
+            <span className="hidden sm:inline">Give it a shot!</span>
           </button>
         </motion.div>
         <motion.div
@@ -1308,8 +1364,8 @@ const Hero = () => {
             />
 
             {/* Action Buttons */}
-            <div className="justify-between items-center flex w-full">
-              <div className="flex items-center gap-2">
+            <div className="flex w-full items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pr-1 md:gap-2">
                 <button
                   disabled={
                     loading ||
@@ -1321,30 +1377,31 @@ const Hero = () => {
                 >
                   <FaPaperclip />
                 </button>
-                <button
+                {/* <button
                   disabled={
                     loading ||
                     (needsUpgrade as boolean)
                   }
                   onClick={handleFigmaImport}
-                  className="cursor-pointer p-2 rounded-md text-xs font-sans font-medium gap-x-1 flex justify-center items-center transition-colors text-[#b1b1b1] hover:bg-[#2a292c]"
+                  className="hidden cursor-pointer items-center justify-center gap-x-1 rounded-md p-2 text-xs font-sans font-medium text-[#b1b1b1] transition-colors hover:bg-[#2a292c] md:flex"
                   title="Attach image"
                 >
                   <CgFigma />
                   <div className="hidden md:block">Import from Figma</div>
-                </button>
+                </button> */}
 
                 {/* Model Dropdown */}
                 <div className="relative" ref={modelDropdownRef}>
                   <button
                     disabled={loading}
                     onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-                    className="cursor-pointer text-[#71717A] hover:text-[#b1b1b1] hover:bg-[#1c1c1d] px-3 py-1.5 rounded-full text-xs font-sans font-medium gap-x-1 flex justify-center items-center hover:text-white transition-colors min-w-[70px]"
+                    className="cursor-pointer text-[#71717A] hover:text-[#b1b1b1] hover:bg-[#1c1c1d] px-3 py-1.5 rounded-full text-xs font-sans font-medium gap-x-1 flex justify-center items-center hover:text-white transition-colors min-w-[70px] max-w-[140px] md:max-w-none"
                   >
-                    <span className="truncate">
-                      {modelOptions.find(
-                        (option) => option.name === selectedModel
-                      )?.display || selectedModel}
+                    <span className="truncate md:hidden">
+                      {compactModelLabel}
+                    </span>
+                    <span className="hidden truncate md:inline">
+                      {selectedModelOption?.display || selectedModel}
                     </span>
                     <FaChevronDown
                       className={`transition-transform duration-200 ${modelDropdownOpen ? "rotate-180" : ""}`}
@@ -1433,7 +1490,7 @@ const Hero = () => {
                 className="hidden"
               />
 
-              <div className="flex items-center gap-2">
+              <div className="hidden items-center gap-2 md:flex">
                 {/* Voice Waves */}
                 <VoiceWaves isListening={isListening} />
                 {/* Microphone Button */}
@@ -1478,6 +1535,71 @@ const Hero = () => {
                   <button
                     disabled={loading}
                     className="cursor-pointer hover:bg-gray-200 text-[#71717A] bg-white p-2 rounded-md text-xs font-sans font-medium gap-x-1 flex justify-center items-center"
+                  >
+                    <LuLoaderCircle className="animate-spin" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex shrink-0 items-center justify-end gap-2 md:hidden">
+                {needsUpgrade === true ? (
+                  <button
+                    disabled={loading}
+                    onClick={() => {
+                      dispatch(setPricingModalOpen(true));
+                    }}
+                    className="justify-center items-center flex font-sans py-2 gap-x-1 font-medium text-white bg-[#4F92E1] rounded-md hover:bg-[#4F92E3] text-xs border border-[#6A65F2] cursor-pointer px-3"
+                  >
+                    Upgrade to Scale
+                  </button>
+                ) : needsUpgrade === false ? (
+                  <button
+                    disabled={
+                      loading ||
+                      (!isListening && !hasInputText && !speechSupported)
+                    }
+                    onClick={() => {
+                      if (isListening) {
+                        stopListening();
+                        return;
+                      }
+
+                      if (hasInputText) {
+                        handleGenerate();
+                        return;
+                      }
+
+                      startListening();
+                    }}
+                    className={`cursor-pointer p-2.5 rounded-md text-xs font-sans font-medium gap-x-1 flex justify-center items-center min-w-[42px] min-h-[42px] transition-colors ${
+                      isListening
+                        ? "text-blue-400 bg-blue-900/20 hover:bg-blue-900/30 animate-pulse"
+                        : hasInputText
+                          ? "hover:bg-gray-200 text-[#71717A] bg-white"
+                          : "text-[#71717A] hover:bg-[#2a292c] bg-[#1c1c1d]"
+                    }`}
+                    title={
+                      isListening
+                        ? "Stop recording"
+                        : hasInputText
+                          ? "Send prompt"
+                          : "Start voice input"
+                    }
+                  >
+                    {loading ? (
+                      <LuLoaderCircle className="animate-spin" />
+                    ) : isListening ? (
+                      <FaStop />
+                    ) : hasInputText ? (
+                      <FaArrowRight />
+                    ) : (
+                      <FaMicrophone />
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    disabled
+                    className="cursor-pointer hover:bg-gray-200 text-[#71717A] bg-white p-2.5 rounded-md text-xs font-sans font-medium gap-x-1 flex justify-center items-center min-w-[42px] min-h-[42px]"
                   >
                     <LuLoaderCircle className="animate-spin" />
                   </button>

@@ -21,6 +21,7 @@ import { FaChevronDown, FaChevronUp } from "react-icons/fa";
 import { API } from "@/app/config/publicEnv";
 import { useGetChatMessages } from "@/app/_services/useChatOperations";
 import { extractFileWritesFromSnapshot } from "@/app/_services/fileUpdatesMobile";
+import { fetchProjectSnapshot } from "@/app/helpers/fetchProjectSnapshot";
 
 // Collapsible Image Component
 const CollapsibleImage = ({ src, alt }: { src: string; alt?: string }) => {
@@ -159,6 +160,46 @@ const filterRenderableAttachments = (attachments?: any[]) => {
   });
 };
 
+const isRedundantAttachmentMessage = (
+  content: string | undefined,
+  attachments?: any[],
+) => {
+  const trimmedContent = typeof content === "string" ? content.trim() : "";
+  if (!trimmedContent || !attachments || attachments.length === 0) return false;
+
+  const normalizedContent = trimmedContent.replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(normalizedContent)) return false;
+
+  return attachments.some((att) => {
+    const rawUrl = att?.url != null ? String(att.url).trim() : "";
+    if (!rawUrl) return false;
+    const normalizedUrl = rawUrl.replace(/\/+$/, "");
+    return normalizedUrl === normalizedContent;
+  });
+};
+
+const getAttachmentDisplayName = (attachment: any) => {
+  const rawUrl = attachment?.url != null ? String(attachment.url).trim() : "";
+  const normalizedUrl = rawUrl.replace(/\/+$/, "");
+  const candidates = [attachment?.label, attachment?.name]
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean);
+
+  const preferred = candidates.find((value) => {
+    const normalizedValue = value.replace(/\/+$/, "");
+    return (
+      !/^https?:\/\//i.test(normalizedValue) && normalizedValue !== normalizedUrl
+    );
+  });
+
+  if (preferred) return preferred;
+
+  const fileType = attachment?.type || getAttachmentFileType(rawUrl);
+  if (fileType === "pdf") return "PDF";
+  if (fileType === "code") return "Code Reference";
+  return "Reference image";
+};
+
 // Message Attachments Component
 const MessageAttachments = ({
   attachments,
@@ -183,6 +224,7 @@ const MessageAttachments = ({
         {filteredAttachments.map((attachment, attIndex) => {
           const fileType =
             attachment.type || getAttachmentFileType(attachment.url || "");
+          const displayName = getAttachmentDisplayName(attachment);
           return (
             <motion.div
               key={attIndex}
@@ -195,7 +237,7 @@ const MessageAttachments = ({
               {fileType === "image" && (
                 <CollapsibleImage
                   src={attachment.url}
-                  alt={attachment.label || attachment.name}
+                  alt={displayName}
                 />
               )}
 
@@ -210,7 +252,7 @@ const MessageAttachments = ({
                     <span
                       className={`text-xs font-medium truncate block text-white/80`}
                     >
-                      {attachment.label || attachment.name || "PDF"}
+                      {displayName}
                     </span>
                   </div>
                 </div>
@@ -219,7 +261,7 @@ const MessageAttachments = ({
               {fileType === "code" && (
                 <div
                   className={`w-full h-[60px] rounded-md overflow-hidden bg-[#1D1E22] flex flex-row items-center p-2 relative border border-[#2a2a2b] gap-2`}
-                  title={attachment.label || attachment.name}
+                  title={displayName}
                 >
                   <div className="flex-shrink-0 w-8 h-8 bg-[#2a2a2b] rounded flex items-center justify-center">
                     <FaCode className={`text-[#4a90e2] text-sm`} />
@@ -682,13 +724,11 @@ const Messages = () => {
       // If restore was successful, fetch and apply the code
       if (data.success && data.codeUrl) {
         try {
-          // Fetch the code from CloudFront URL
-          const codeResponse = await fetch(data.codeUrl);
-          if (!codeResponse.ok) {
-            throw new Error("Failed to fetch code from CloudFront");
-          }
-
-          const codeData = await codeResponse.json();
+          const codeData = await fetchProjectSnapshot({
+            projectId: generatedName,
+            userEmail: session.user.email,
+            codeUrl: data.codeUrl,
+          });
           const fileWrites = extractFileWritesFromSnapshot(codeData);
 
           for (const write of fileWrites) {
@@ -1044,6 +1084,10 @@ const Messages = () => {
 
                 if (msg.role === "user") {
                   const attachments = (msg.attachments || []).slice(0, 5); // Max 5 attachments
+                  const shouldHideUserText = isRedundantAttachmentMessage(
+                    msg.content,
+                    attachments,
+                  );
 
                   return (
                     <div
@@ -1064,7 +1108,7 @@ const Messages = () => {
                         />
 
                         {/* Message text */}
-                        {msg.content && (
+                        {msg.content && !shouldHideUserText && (
                           <p className={`break-words text-end text-white/80`}>
                             {msg.content}
                           </p>
@@ -1110,6 +1154,10 @@ const Messages = () => {
                     </div>
                   );
                 } else {
+                  const shouldHideAssistantText = isRedundantAttachmentMessage(
+                    msg.content,
+                    renderableAttachments,
+                  );
                   return (
                     <div
                       key={msg.id || originalIndex}
@@ -1148,6 +1196,7 @@ const Messages = () => {
                         />
 
                         {msg.content &&
+                          !shouldHideAssistantText &&
                           msg.toolResult?.UsedTool !== "generate_image" && (
                             <div
                               className={`break-words w-full text-start prose prose-invert prose-sm max-w-none text-white/80`}

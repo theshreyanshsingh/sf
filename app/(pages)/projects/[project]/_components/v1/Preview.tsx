@@ -281,7 +281,16 @@ const Preview = () => {
 
   const { email } = useAuthenticated();
   const dispatch = useDispatch();
-  const { refreshCounter, responsive, inspectorMode, editMode, showTemplateBlocks, selectedBlock: selectedBlockFromStore, previewUrl } = useSelector((state: RootState) => state.projectOptions);
+  const {
+    refreshCounter,
+    responsive,
+    inspectorMode,
+    editMode,
+    showTemplateBlocks,
+    showPreviewPageBar,
+    selectedBlock: selectedBlockFromStore,
+    previewUrl,
+  } = useSelector((state: RootState) => state.projectOptions);
   const { files: projectFiles, currentFile, data: projectData, fetchedData: fetchedProjectData } = useSelector(
     (state: RootState) => state.projectFiles
   );
@@ -310,6 +319,12 @@ const Preview = () => {
     const pagePath = normalizePagePath(currentPage);
     return `${base}/${pagePath}`;
   }, [previewUrl, currentPage, normalizePagePath]);
+
+  useEffect(() => {
+    if (showPreviewPageBar) return;
+    setSitePanelOpen(false);
+    setEmbedPanelOpen(false);
+  }, [showPreviewPageBar]);
 
   const splitEmbeds = useCallback((value: string) => {
     return (value || "")
@@ -1241,7 +1256,7 @@ Update the React components NOW to preserve all formatting.`;
       )}
 
       <div className="flex-1 min-w-0 relative h-full w-full">
-        {previewUrl && (
+        {previewUrl && showPreviewPageBar && (
           <div className="absolute top-3 left-3 right-3 z-40 flex flex-col gap-2 pointer-events-auto">
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#2a2a2b] bg-[#111116]/90 backdrop-blur-xl px-3 py-2 shadow-lg">
               <div className="flex items-center gap-2 flex-1 min-w-0">

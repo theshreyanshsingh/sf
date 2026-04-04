@@ -18,6 +18,8 @@ import { ALL_STARTING_POINTS } from "@/app/config/startingPoints";
 import {
   resetProjectOptions,
   lockPreviewRuntime,
+  fetchProject,
+  setGenerating,
 } from "@/app/redux/reducers/projectOptions";
 import { resolvePreviewRuntimeFromRecord } from "@/app/helpers/previewRuntime";
 import { EmptySheet } from "@/app/redux/reducers/projectFiles";
@@ -39,6 +41,7 @@ export function useProject() {
   const path = usePathname();
 
   const fetchedRef = useRef<string | null>(null);
+  const fetchInFlightRef = useRef<string | null>(null);
   const restoredRef = useRef<string | null>(null);
   const clearedRef = useRef<string | null>(null);
 
@@ -123,8 +126,9 @@ export function useProject() {
   // Function to fetch project data
   const fetchProjectData = useCallback(() => {
     const projectId = getProjectId();
+    const userEmail = session?.user?.email || "";
 
-    if (!projectId || !session?.user?.email) {
+    if (!projectId || !userEmail) {
       return;
     }
 
@@ -144,6 +148,7 @@ export function useProject() {
     }
 
     if (
+      fetchInFlightRef.current === projectId ||
       fetchedRef.current === projectId ||
       (currentProjectId === projectId && loading === "done")
     ) {
@@ -178,6 +183,16 @@ export function useProject() {
       dispatch(lockPreviewRuntime(restoredData.previewRuntime));
     }
     const requestedPreviewRuntime = restoredData?.previewRuntime || undefined;
+
+    if (restoredData && requestedPreviewRuntime !== "mobile") {
+      dispatch(
+        setGenerating({
+          generating: true,
+          isResponseCompleted: false,
+          generationSuccess: "thinking",
+        }),
+      );
+    }
 
     const effectiveStartingPoint = didReset ? null : startingPoint;
     const startingPointId =
@@ -218,18 +233,45 @@ export function useProject() {
         }- Keep the design responsive and production-ready.\n[END_STARTING_POINT]`
       : normalizedUserRequest;
 
-    createResponse({
-      email: session?.user.email || "",
-      projectId,
-      chatId: resolvedChatId,
-      fix: false,
-      save: false,
-      input: finalPrompt,
-      model: modelToUse || undefined,
-      previewRuntime: requestedPreviewRuntime,
-    });
-    // Update ref to prevent duplicate fetches
-    fetchedRef.current = projectId;
+    fetchInFlightRef.current = projectId;
+
+    void (async () => {
+      try {
+        await dispatch(
+          fetchProject({
+            string: JSON.stringify({
+              projectId,
+              owner: userEmail,
+              ...(requestedPreviewRuntime
+                ? { previewRuntime: requestedPreviewRuntime }
+                : {}),
+            }),
+          }),
+        ).unwrap();
+
+        if (restoredData) {
+          await createResponse({
+            email: userEmail,
+            projectId,
+            chatId: resolvedChatId,
+            fix: false,
+            save: false,
+            input: finalPrompt,
+            model: modelToUse || undefined,
+            previewRuntime: requestedPreviewRuntime,
+          });
+        }
+
+        fetchedRef.current = projectId;
+      } catch (error) {
+        console.error("Error loading project metadata:", error);
+        fetchedRef.current = null;
+      } finally {
+        if (fetchInFlightRef.current === projectId) {
+          fetchInFlightRef.current = null;
+        }
+      }
+    })();
   }, [
     getProjectId,
     session,
@@ -248,6 +290,9 @@ export function useProject() {
     const projectId = getProjectId();
     if (fetchedRef.current !== projectId) {
       fetchedRef.current = null;
+    }
+    if (fetchInFlightRef.current !== projectId) {
+      fetchInFlightRef.current = null;
     }
     if (restoredRef.current !== projectId) {
       restoredRef.current = null;

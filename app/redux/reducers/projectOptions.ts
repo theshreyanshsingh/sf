@@ -141,8 +141,21 @@ export const fetchProject = createAsyncThunk<
     thunkAPI.dispatch(setId(data.id));
     thunkAPI.dispatch(setClaudeApiKey(data.apikey));
 
+    const resolvedPreviewRuntime =
+      data.previewRuntime === "mobile" || data.previewRuntime === "web"
+        ? data.previewRuntime
+        : data.runtime === "mobile" || data.runtime === "web"
+          ? data.runtime
+          : data.platform === "mobile" || data.platform === "web"
+            ? data.platform
+            : inferPreviewRuntime(data.framework);
+
     if (!data.url) {
-      thunkAPI.dispatch(setGenerationSuccess(null));
+      thunkAPI.dispatch(
+        setGenerationSuccess(
+          resolvedPreviewRuntime === "web" ? "thinking" : null,
+        ),
+      );
     }
 
     sessionStorage.setItem("framework", data.framework);
@@ -164,13 +177,9 @@ export const fetchProject = createAsyncThunk<
       tokensRemaining: data.tokensRemaining,
       startingPoint: data.startingPoint || null,
       previewRuntime:
-        data.previewRuntime === "mobile" || data.previewRuntime === "web"
-          ? data.previewRuntime
-          : data.runtime === "mobile" || data.runtime === "web"
-            ? data.runtime
-            : data.platform === "mobile" || data.platform === "web"
-              ? data.platform
-              : null,
+        resolvedPreviewRuntime === "mobile" || resolvedPreviewRuntime === "web"
+          ? resolvedPreviewRuntime
+          : null,
     };
   } catch (error: unknown) {
     return thunkAPI.rejectWithValue(error);
@@ -209,6 +218,7 @@ interface PlanState {
   inspectorMode: boolean;
   editMode: boolean;
   showTemplateBlocks: boolean;
+  showPreviewPageBar: boolean;
   model: string | null;
   pendingAttachment: {
     fileName: string;
@@ -263,6 +273,7 @@ const buildInitialState = (): PlanState => ({
   inspectorMode: false,
   editMode: false,
   showTemplateBlocks: false,
+  showPreviewPageBar: false,
   model: null,
   pendingAttachment: null,
   selectedBlock: null,
@@ -322,6 +333,12 @@ const projectOptions = createSlice({
       return {
         ...state,
         promptCount: action.payload,
+      };
+    },
+    setShowPreviewPageBar: (state, action: PayloadAction<boolean>) => {
+      return {
+        ...state,
+        showPreviewPageBar: action.payload,
       };
     },
     setTokenUsage: (
@@ -718,6 +735,7 @@ export const {
   setReaderMode,
   setprojectDetails,
   setPromptCount,
+  setShowPreviewPageBar,
   setTokenUsage,
   clearUrlAndPrompt,
   setGenerationSuccess,

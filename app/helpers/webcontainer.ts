@@ -183,8 +183,7 @@ export async function fetchAndMountTestFiles(): Promise<Record<string, string> |
 export async function syncFiles(
   files: Record<string, string>,
 ): Promise<void> {
-  const wc = getContainer();
-  if (!wc) return;
+  const wc = await boot();
 
   for (const [rawPath, content] of Object.entries(files)) {
     const normalizedPath = normalizeProjectPath(rawPath);
@@ -216,12 +215,21 @@ export async function syncFiles(
 /* ------------------------------------------------------------------ */
 
 let serverReadyRegistered = false;
+const serverReadyCallbacks = new Set<(port: number, url: string) => void>();
 
 export async function onServerReady(
   cb: (port: number, url: string) => void,
-): Promise<void> {
-  if (serverReadyRegistered) return;
-  const wc = await boot();
-  serverReadyRegistered = true;
-  wc.on("server-ready", (port, url) => cb(port, url));
+): Promise<() => void> {
+  serverReadyCallbacks.add(cb);
+  if (!serverReadyRegistered) {
+    const wc = await boot();
+    serverReadyRegistered = true;
+    wc.on("server-ready", (port, url) => {
+      serverReadyCallbacks.forEach((callback) => callback(port, url));
+    });
+  }
+
+  return () => {
+    serverReadyCallbacks.delete(cb);
+  };
 }

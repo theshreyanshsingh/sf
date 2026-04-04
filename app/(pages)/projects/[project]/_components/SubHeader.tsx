@@ -16,6 +16,7 @@ import {
   setInspectorMode,
   setEditMode,
   setShowTemplateBlocks,
+  setShowPreviewPageBar,
 } from "@/app/redux/reducers/projectOptions";
 
 // const dropdownVariants = {
@@ -29,8 +30,10 @@ const SubHeader: NextPage = () => {
     inspectorMode,
     editMode,
     showTemplateBlocks,
+    showPreviewPageBar,
     previewUrl,
     previewRuntime,
+    isStreamActive,
   } = useSelector((state: RootState) => state.projectOptions);
   const isMobilePreviewRuntime = previewRuntime === "mobile";
 
@@ -130,6 +133,31 @@ const SubHeader: NextPage = () => {
       <div className="flex items-center space-x-4">
         {!isMobilePreviewRuntime && (
           <button
+            onClick={() =>
+              reduxDispatch(setShowPreviewPageBar(!showPreviewPageBar))
+            }
+            disabled={!!isStreamActive}
+            className={`flex items-center cursor-pointer text-xs gap-1 justify-center transition-colors ${
+              isStreamActive
+                ? "text-gray-500 cursor-not-allowed"
+                : showPreviewPageBar
+                ? "text-[#4a90e2]"
+                : "text-white hover:text-gray-300"
+            }`}
+            title={
+              isStreamActive
+                ? "Navigator becomes available after streaming finishes"
+                : showPreviewPageBar
+                  ? "Hide navigator"
+                  : "Show navigator"
+            }
+            type="button"
+          >
+            Navigator
+          </button>
+        )}
+        {!isMobilePreviewRuntime && (
+          <button
             onClick={() => {
               if (responsive === "desktop") {
                 reduxDispatch(setResponsivess({ responsive: "mobile" }));
@@ -138,6 +166,7 @@ const SubHeader: NextPage = () => {
               }
             }}
             className="flex items-center cursor-pointer text-white text-xs gap-1 justify-center"
+            type="button"
           >
             {responsive === "mobile" ? (
               <CiLaptop className="text-md" />

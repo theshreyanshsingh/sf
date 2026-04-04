@@ -24,6 +24,7 @@ import {
 
 import { clearImages, clearImagesURL } from "../redux/reducers/basicData";
 import { API } from "../config/publicEnv";
+import { fetchProjectSnapshot } from "@/app/helpers/fetchProjectSnapshot";
 
 interface GenerateFileParams {
   email: string;
@@ -636,6 +637,9 @@ export const useGenerateFile = () => {
 
   const fetchProjectFiles = async (data: FetchProjectFilesParams) => {
     try {
+      if (!projectId || !email) {
+        throw new Error("Missing project context for snapshot fetch.");
+      }
       dispatch(
         setGenerating({
           generating: true,
@@ -643,60 +647,42 @@ export const useGenerateFile = () => {
           isResponseCompleted: true,
         }),
       );
-      const response = await fetch(data.url, {
-        method: "GET",
-        mode: "cors",
-        headers: {
-          "Content-Type": "application/json",
-        },
+      const responseData = await fetchProjectSnapshot({
+        projectId,
+        userEmail: email.value || "",
+        codeUrl: data.url,
       });
+      const rawFiles =
+        responseData.initialCode ||
+        responseData.data ||
+        responseData.generatedFiles ||
+        responseData;
+      const projectFiles = safelyParse(rawFiles);
 
-      if (response.ok) {
-        const responseData = (await response.json()) as Record<string, any>;
+      const shouldNormalize =
+        previewRuntime === "web" || isLikelyWebProject(projectFiles);
+      const normalizedFiles = shouldNormalize
+        ? normalizeWebProjectFiles(projectFiles).files
+        : projectFiles;
 
-        // Extract files from response data if they are nested
-        const rawFiles =
-          responseData.initialCode ||
-          responseData.data ||
-          responseData.generatedFiles ||
-          responseData;
-        const projectFiles = safelyParse(rawFiles);
-
-        const shouldNormalize =
-          previewRuntime === "web" || isLikelyWebProject(projectFiles);
-        const normalizedFiles = shouldNormalize
-          ? normalizeWebProjectFiles(projectFiles).files
-          : projectFiles;
-
-        // Visualise the fetched project
-        dispatch(setprojectFiles(buildFileTree(normalizedFiles)));
-
-        dispatch(setprojectData(normalizedFiles));
-        dispatch(setReaderMode(false));
-        dispatch(
-          setGenerating({
-            generating: false,
-            generationSuccess: "success",
-            isResponseCompleted: true,
-          }),
-        );
-      } else {
-        dispatch(
-          setGenerating({
-            generating: false,
-            generationSuccess: "failed",
-            isResponseCompleted: true,
-          }),
-        );
-        dispatch(
-          setNotification({
-            modalOpen: true,
-            status: "error",
-            text: "Preview is not available at the moment! Please try again.",
-          }),
-        );
-      }
+      dispatch(setprojectFiles(buildFileTree(normalizedFiles)));
+      dispatch(setprojectData(normalizedFiles));
+      dispatch(setReaderMode(false));
+      dispatch(
+        setGenerating({
+          generating: false,
+          generationSuccess: "success",
+          isResponseCompleted: true,
+        }),
+      );
     } catch (error) {
+      dispatch(
+        setGenerating({
+          generating: false,
+          generationSuccess: "failed",
+          isResponseCompleted: true,
+        }),
+      );
       dispatch(
         setNotification({
           modalOpen: true,
