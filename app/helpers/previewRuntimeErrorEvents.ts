@@ -35,29 +35,36 @@ function fingerprint(d: PreviewRuntimeErrorDetail): string {
   return `${d.source}:${d.title}:${d.body.slice(0, 800)}`;
 }
 
+const REACT_DOM_PROP_WARNING_MARKERS =
+  /does not recognize|spell it as lowercase|Invalid DOM property|React does not understand|passed it from a parent|remove it from the DOM|on a DOM element|custom attribute/i;
+
 /**
- * React warns when JSX uses `data-Superblocks-code` instead of `data-superblocks-code`.
- * 1) If the invalid casing appears literally, always hide (matches React's warning args).
- * 2) Otherwise hide known full-message patterns mentioning superblocks-code.
+ * React warns when JSX uses `data-Superblocks-*` instead of `data-superblocks-*`.
+ * Hide those console forwards (code + id attrs from inspector/codegen).
  */
+function isSuppressedSuperblocksDataAttrMessage(
+  combined: string,
+  suffix: "code" | "id",
+): boolean {
+  const badLiteral =
+    suffix === "code"
+      ? /data-Superblocks-code\b/
+      : /data-Superblocks-id\b/;
+  if (badLiteral.test(combined)) return true;
+
+  const mentionsAttr = new RegExp(`superblocks-${suffix}\\b`, "i");
+  if (!mentionsAttr.test(combined)) return false;
+
+  return REACT_DOM_PROP_WARNING_MARKERS.test(combined);
+}
+
 function shouldSuppressPreviewRuntimeError(d: PreviewRuntimeErrorDetail): boolean {
   const combined = `${d.title}\n${d.body}\n${d.stack ?? ""}`;
 
-  // Exact bad attribute from codegen (capital S). React echoes this even when the template uses %s.
-  if (/data-Superblocks-code/.test(combined)) return true;
+  if (isSuppressedSuperblocksDataAttrMessage(combined, "code")) return true;
+  if (isSuppressedSuperblocksDataAttrMessage(combined, "id")) return true;
 
-  if (!/superblocks-code/i.test(combined)) return false;
-
-  return (
-    /does not recognize/i.test(combined) ||
-    /spell it as lowercase/i.test(combined) ||
-    /Invalid DOM property/i.test(combined) ||
-    /React does not understand/i.test(combined) ||
-    /passed it from a parent/i.test(combined) ||
-    /remove it from the DOM/i.test(combined) ||
-    /on a DOM element/i.test(combined) ||
-    /custom attribute/i.test(combined)
-  );
+  return false;
 }
 
 /** De-duplicated dispatch so Vite overlay polling / duplicate events do not spam the UI. */
