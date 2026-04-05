@@ -15,6 +15,9 @@ interface ProjectsSidebarProps {
   onClose: () => void;
 }
 
+const INITIAL_VISIBLE_PROJECTS = 10;
+const LOAD_MORE_PROJECTS_STEP = 10;
+
 const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({
   isOpen,
   onClose,
@@ -22,6 +25,24 @@ const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({
   const { email } = useAuthenticated();
   const { projects, loading } = useProjectsData(email.value);
   const router = useRouter();
+  const [visibleProjectsCount, setVisibleProjectsCount] = React.useState(
+    INITIAL_VISIBLE_PROJECTS
+  );
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    setVisibleProjectsCount(INITIAL_VISIBLE_PROJECTS);
+  }, [isOpen]);
+
+  const visibleProjects = React.useMemo(
+    () => projects.slice(0, visibleProjectsCount),
+    [projects, visibleProjectsCount]
+  );
+
+  const hasMoreProjects = projects.length > visibleProjectsCount;
 
   const handleOpenProject = (project: any) => {
     onClose();
@@ -114,10 +135,10 @@ const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({
                 </div>
               ) : projects && projects.length > 0 ? (
                 <div className="space-y-2">
-                  {projects.slice(0, 10).map((project, index) => (
+                  {visibleProjects.map((project) => (
                     <div
                       key={project.generatedName}
-                      className="p-3  transition-colors "
+                      className="p-3 transition-colors"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
@@ -161,6 +182,23 @@ const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({
                       </div>
                     </div>
                   ))}
+
+                  {hasMoreProjects && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setVisibleProjectsCount((currentCount) =>
+                          Math.min(
+                            currentCount + LOAD_MORE_PROJECTS_STEP,
+                            projects.length
+                          )
+                        )
+                      }
+                      className="w-full rounded-xl border border-[#2A2A2A] bg-[#1B1B1D] px-4 py-3 text-sm font-medium text-white transition-colors hover:border-[#3A3A3D] hover:bg-[#232326]"
+                    >
+                      Load more
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="text-center py-8">

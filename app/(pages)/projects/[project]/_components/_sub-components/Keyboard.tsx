@@ -13,7 +13,6 @@ import {
 import { setNotification } from "@/app/redux/reducers/NotificationModalReducer";
 import {
   setPendingAttachment,
-  setPromptCount,
   setSelectedBlock,
 } from "@/app/redux/reducers/projectOptions";
 import { RootState } from "@/app/redux/store";
@@ -284,10 +283,6 @@ const Keyboard: NextPage = () => {
       if (!message.trim()) return;
 
       try {
-        if (typeof promptCount === "number" && promptCount > 0) {
-          dispatch(setPromptCount(promptCount - 1));
-        }
-
         setAttachments([]);
 
         setMessage("");
@@ -319,7 +314,6 @@ const Keyboard: NextPage = () => {
     [
       message,
       dispatch,
-      promptCount,
       getProjectId,
       createSecondaryResponse,
       email.value,

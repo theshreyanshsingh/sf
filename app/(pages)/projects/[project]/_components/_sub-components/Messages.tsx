@@ -10,11 +10,19 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Message } from "@/app/redux/reducers/chatSlice";
 import { useSession } from "next-auth/react";
 import { usePathname } from "next/navigation";
 
-import { setMessages, clearMessages } from "@/app/redux/reducers/chatSlice";
+import {
+  setMessages,
+  clearMessages,
+  type Message,
+} from "@/app/redux/reducers/chatSlice";
+import type { Todo } from "@/app/redux/reducers/todosSlice";
+import {
+  dbMessageToUiMessage,
+  syncTodosFromHydratedMessages,
+} from "@/app/_services/agentMessageNormalize";
 import { updateSpecificFile } from "@/app/redux/reducers/projectFiles";
 import { refreshPreview } from "@/app/redux/reducers/projectOptions";
 import { FaChevronDown, FaChevronUp } from "react-icons/fa";
@@ -128,6 +136,86 @@ const FileWrites = ({
     </motion.div>
   );
 };
+
+function formatAgentDurationMs(ms: number): string {
+  const s = Math.max(1, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
+}
+
+const AgentRunBanner = ({ durationMs }: { durationMs: number }) => (
+  <div className="w-full min-w-0 self-stretch flex items-center gap-3 my-1 text-zinc-400 text-xs">
+    <div className="h-px min-w-0 flex-1 bg-zinc-700/80" />
+    <span className="shrink-0 font-medium tracking-tight">
+      Worked for {formatAgentDurationMs(durationMs)}
+    </span>
+    <div className="h-px min-w-0 flex-1 bg-zinc-700/80" />
+  </div>
+);
+
+/** Model often echoes file counts as prose; we render the structured FileWrites chip instead. */
+function lineLooksLikeWroteFilesCount(line: string): boolean {
+  const t = line
+    .replace(/\*+/g, "")
+    .replace(/^#+\s*/, "")
+    .replace(/^>\s*/, "")
+    .replace(/^[-*+]\s+/, "")
+    .replace(/^\d+\.\s+/, "")
+    .trim();
+  return /^Wrote\s+\d+\s+files?\.?$/i.test(t);
+}
+
+/** Model echoes single-file writes; FileWrites chip already shows paths. */
+function lineLooksLikeWroteFileEcho(line: string): boolean {
+  const t = line
+    .replace(/\*+/g, "")
+    .replace(/^#+\s*/, "")
+    .replace(/^>\s*/, "")
+    .trim();
+  if (/^wrote\s+file:\s*\S+/i.test(t)) return true;
+  if (/^wrote\s+file\s*:\s*\S+/i.test(t)) return true;
+  if (/^wrote\s+\/[^\s`]+/i.test(t)) return true;
+  if (/^wrote\s+[`']?[\w./\-]+\.(jsx?|tsx?|mjsx?|json|html|css|vue|svelte)\b/i.test(t))
+    return true;
+  return false;
+}
+
+function stripRedundantAssistantProse(
+  content: string,
+  opts: {
+    stripWroteFiles: boolean;
+    stripTasksHeading: boolean;
+    stripFileEchoLines?: boolean;
+  },
+): string {
+  if (typeof content !== "string") return content;
+  let lines = content.split("\n");
+  if (opts.stripWroteFiles) {
+    lines = lines.filter((line) => !lineLooksLikeWroteFilesCount(line));
+  }
+  if (opts.stripFileEchoLines !== false) {
+    lines = lines.filter((line) => !lineLooksLikeWroteFileEcho(line));
+  }
+  if (opts.stripTasksHeading) {
+    lines = lines.filter((line) => {
+      const t = line.replace(/\*+/g, "").replace(/^#+\s*/, "").trim();
+      return !/^tasks$/i.test(t);
+    });
+  }
+  let out = lines.join("\n");
+  if (opts.stripWroteFiles) {
+    out = out.replace(
+      /(^|\n)[\t \u00a0]*Wrote\s+\d+\s+files?\.?[\t \u00a0]*(?=\n|$)/gi,
+      "$1",
+    );
+  }
+  return out
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+}
 
 const getAttachmentFileType = (url: string): "image" | "pdf" | "code" => {
   const hasValidUrl =
@@ -296,6 +384,7 @@ const Messages = () => {
   const { chatId, messagesChatId, streamChatId } = useSelector(
     (state: RootState) => state.messagesprovider,
   );
+  const reduxTodos = useSelector((state: RootState) => state.todos.todos);
   const {
     getChatMessages,
     loading: messagesLoading,
@@ -454,19 +543,11 @@ const Messages = () => {
     };
   };
 
-  // Convert API chat messages to Redux Message format
-  const convertChatToMessage = useCallback((chat: any): Message => {
-    return {
-      id: chat._id || chat.id || `msg-${Date.now()}-${Math.random()}`,
-      _id: chat._id || chat.id, // Preserve original database ID
-      role: chat.role || "assistant",
-      content: chat.content || chat.text || "",
-      createdAt: chat.createdAt || new Date().toISOString(),
-      attachments: chat.attachments || [],
-      toolResult: chat.toolResult,
-      codeUrl: chat.codeUrl || chat.code_url,
-    };
-  }, []);
+  const convertChatToMessage = useCallback(
+    (chat: Parameters<typeof dbMessageToUiMessage>[0]): Message =>
+      dbMessageToUiMessage(chat),
+    [],
+  );
 
   // Load initial messages when chatId changes
   useEffect(() => {
@@ -517,12 +598,25 @@ const Messages = () => {
         .then((result) => {
           if (result.success && result.messages) {
             const convertedMessages = result.messages.map(convertChatToMessage);
+            const total =
+              result.pagination &&
+              typeof result.pagination.totalMessages === "number"
+                ? result.pagination.totalMessages
+                : convertedMessages.length;
+            if (total > 0 && convertedMessages.length === 0) {
+              console.warn(
+                "[Messages] Chat reports messages in DB but none returned; retry load.",
+              );
+              hasLoadedInitialMessages.current = false;
+              return;
+            }
             dispatch(
               setMessages({
                 messages: convertedMessages,
                 chatId: chatId.trim(),
               }),
             );
+            syncTodosFromHydratedMessages(convertedMessages, dispatch);
             // Scroll to bottom after initial load
             setTimeout(() => {
               messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -546,7 +640,6 @@ const Messages = () => {
     }
   }, [
     chatId,
-    messagesChatId,
     session?.user?.email,
     getProjectIdFromPath,
     convertChatToMessage,
@@ -593,6 +686,7 @@ const Messages = () => {
                   chatId: currentChatId,
                 }),
               );
+              syncTodosFromHydratedMessages(newMessages, dispatch);
 
               // Maintain scroll position after prepending
               const scrollHeight = container.scrollHeight;
@@ -771,7 +865,7 @@ const Messages = () => {
   return (
     <div
       ref={messagesContainerRef}
-      className={`w-full h-full max-w-3xl py-4 px-2 space-y-5 text-[13px] text-balance leading-relaxed font-sans font-medium overflow-y-auto overflow-x-hidden scroll-smooth text-white`}
+      className={`w-full h-full max-w-3xl py-4 px-2 space-y-3 text-[13px] text-balance leading-relaxed font-sans font-medium overflow-y-auto overflow-x-hidden scroll-smooth text-white`}
       style={{ scrollBehavior: "smooth" }}
     >
       {/* Load more indicator at top */}
@@ -781,53 +875,30 @@ const Messages = () => {
         </div>
       )}
       {(() => {
-        const filteredMessages =
-          messages?.filter((msg, index) => {
-            const isLastMessage = index === messages.length - 1;
-            const isGenerateImage =
-              msg.toolResult?.UsedTool === "generate_image";
-
-            if (isGenerateImage && isLastMessage && isStreamActive) {
-              return false; // Hide it to show shimmer
-            }
-
-            return (
-              msg.toolResult?.UsedTool !== "code_write" &&
-              msg.toolResult?.UsedTool !== "code_read" &&
-              msg.toolResult?.UsedTool !== "todo_write" &&
-              msg.toolResult?.UsedTool !== "issue_write" &&
-              msg.toolResult?.UsedTool !== "webfetch" &&
-              msg.toolResult?.UsedTool !== "todo_read" &&
-              msg.toolResult?.UsedTool !== "get_code" &&
-              msg.toolResult?.UsedTool !== "WebScreenShotAndReadWebsiteTool" &&
-              (msg as any).usedTool !== "WebScreenShotAndReadWebsiteTool" &&
-              msg.toolResult?.UsedTool !== "get_project_attachment" &&
-              msg.toolResult?.UsedTool !== "generate_image" &&
-              // Filter out ALL GitHub tools
-              !isGithubTool(msg.toolResult?.UsedTool) &&
-              // Always hide messages containing any tool executions (regardless of role)
-              !(msg.content && /Executed/i.test(msg.content)) &&
-              !(
-                msg.toolResult?.UsedTool &&
-                msg.toolResult?.result?.success === false &&
-                (msg.toolResult?.result as any)?.error?.includes("not found")
-              )
-            );
-          }) || [];
-        // Group consecutive code_write messages
         const extractMessageFileWrites = (
-          msg: any,
+          msg: Message,
         ): Array<{ path: string; content: string }> => {
           const rawCandidates = [
             msg?.toolResult?.fileWrite,
             msg?.toolResult?.fileWrites,
             msg?.toolResult?.result?.fileWrite,
             msg?.toolResult?.result?.fileWrites,
-            msg?.fileWrite,
-            msg?.fileWrites,
+            (msg as Message & { fileWrite?: unknown }).fileWrite,
+            (msg as Message & { fileWrites?: unknown }).fileWrites,
           ];
 
           const writes: Array<{ path: string; content: string }> = [];
+          const normalizeContent = (c: unknown): string | null => {
+            if (typeof c === "string") return c;
+            if (c != null && typeof c === "object") {
+              try {
+                return JSON.stringify(c, null, 2);
+              } catch {
+                return null;
+              }
+            }
+            return null;
+          };
           rawCandidates.forEach((candidate) => {
             if (!candidate) return;
 
@@ -835,13 +906,18 @@ const Messages = () => {
             items.forEach((entry) => {
               if (
                 entry &&
-                typeof entry.path === "string" &&
-                typeof entry.content === "string"
+                typeof entry === "object" &&
+                typeof (entry as { path?: string }).path === "string"
               ) {
-                writes.push({
-                  path: entry.path,
-                  content: entry.content,
-                });
+                const content = normalizeContent(
+                  (entry as { content?: unknown }).content,
+                );
+                if (content != null) {
+                  writes.push({
+                    path: (entry as { path: string }).path,
+                    content,
+                  });
+                }
               }
             });
           });
@@ -854,6 +930,43 @@ const Messages = () => {
           return Array.from(deduped.values());
         };
 
+        const filteredMessages =
+          messages?.filter((msg, index) => {
+            const isLastMessage = index === messages.length - 1;
+            const isGenerateImage =
+              msg.toolResult?.UsedTool === "generate_image";
+
+            if (isGenerateImage && isLastMessage && isStreamActive) {
+              return false; // Hide it to show shimmer
+            }
+
+            const fromMsgFiles = extractMessageFileWrites(msg);
+
+            return (
+              (msg.toolResult?.UsedTool !== "code_write" ||
+                fromMsgFiles.length > 0) &&
+              msg.toolResult?.UsedTool !== "code_read" &&
+              msg.toolResult?.UsedTool !== "issue_write" &&
+              msg.toolResult?.UsedTool !== "webfetch" &&
+              msg.toolResult?.UsedTool !== "todo_read" &&
+              msg.toolResult?.UsedTool !== "get_code" &&
+              msg.toolResult?.UsedTool !== "WebScreenShotAndReadWebsiteTool" &&
+              (msg as Message & { usedTool?: string }).usedTool !==
+                "WebScreenShotAndReadWebsiteTool" &&
+              msg.toolResult?.UsedTool !== "get_project_attachment" &&
+              msg.toolResult?.UsedTool !== "generate_image" &&
+              !isGithubTool(msg.toolResult?.UsedTool) &&
+              !(msg.content && /Executed/i.test(msg.content)) &&
+              !(
+                msg.toolResult?.UsedTool &&
+                msg.toolResult?.result?.success === false &&
+                (msg.toolResult?.result as { error?: string }).error?.includes(
+                  "not found",
+                )
+              )
+            );
+          }) || [];
+
         const groupFileWrites = () => {
           const groups: Array<{
             startIndex: number;
@@ -865,18 +978,16 @@ const Messages = () => {
           } | null = null;
 
           messages?.forEach((msg, index) => {
-            if (msg.toolResult?.UsedTool === "code_write") {
-              const messageFileWrites = extractMessageFileWrites(msg);
+            const messageFileWrites = extractMessageFileWrites(msg);
 
-              if (messageFileWrites.length > 0) {
-                if (!currentGroup) {
-                  currentGroup = {
-                    startIndex: index,
-                    fileWrites: [],
-                  };
-                }
-                currentGroup.fileWrites.push(...messageFileWrites);
+            if (messageFileWrites.length > 0) {
+              if (!currentGroup) {
+                currentGroup = {
+                  startIndex: index,
+                  fileWrites: [],
+                };
               }
+              currentGroup.fileWrites.push(...messageFileWrites);
             } else {
               if (currentGroup) {
                 groups.push(currentGroup);
@@ -899,8 +1010,21 @@ const Messages = () => {
           number,
           Array<{ path: string; content: string }>
         >();
+        const dedupeFileWritesByPath = (
+          writes: Array<{ path: string; content: string }>,
+        ): Array<{ path: string; content: string }> => {
+          const byPath = new Map<string, { path: string; content: string }>();
+          for (const w of writes) {
+            byPath.set(w.path, w);
+          }
+          return Array.from(byPath.values());
+        };
+
         fileWriteGroups.forEach((group) => {
-          fileWriteMap.set(group.startIndex, group.fileWrites);
+          fileWriteMap.set(
+            group.startIndex,
+            dedupeFileWritesByPath(group.fileWrites),
+          );
         });
 
         // Create a set of all indices that have file writes (for quick lookup)
@@ -911,46 +1035,13 @@ const Messages = () => {
             let idx = group.startIndex;
             while (
               idx < messages.length &&
-              messages[idx]?.toolResult?.UsedTool === "code_write"
+              extractMessageFileWrites(messages[idx]!).length > 0
             ) {
               fileWriteIndices.add(idx);
               idx++;
             }
           });
         }
-
-        // Helper to check if a message is effectively hidden
-        const isMsgHidden = (m: any) => {
-          const tool = m.toolResult?.UsedTool;
-          return (
-            tool === "code_write" ||
-            tool === "code_read" ||
-            tool === "todo_write" ||
-            tool === "webfetch" ||
-            tool === "todo_read" ||
-            tool === "WebScreenShotAndReadWebsiteTool" ||
-            (m as any).usedTool === "WebScreenShotAndReadWebsiteTool" ||
-            tool === "get_project_attachment" ||
-            tool === "issue_write" ||
-            isGithubTool(tool) ||
-            (m.content &&
-              /Executed/i.test(m.content) &&
-              tool !== "generate_image") ||
-            (tool &&
-              m.toolResult?.result?.success === false &&
-              (m.toolResult?.result as any)?.error?.includes("not found"))
-          );
-        };
-
-        const shouldShowHeader = (index: number) => {
-          if (!messages || index <= 0) return false;
-          for (let i = index - 1; i >= 0; i--) {
-            const m = messages[i];
-            if (m.role === "user") return true;
-            if (!isMsgHidden(m)) return false;
-          }
-          return false;
-        };
 
         // Helper: For a user message at index, find the codeUrl from subsequent AI messages
         // (before the next user message). Returns the message with codeUrl or null.
@@ -974,6 +1065,209 @@ const Messages = () => {
           return null;
         };
 
+        /** Index of the latest user message in the thread (defines the "current" reply tail). */
+        const latestUserMessageIndex =
+          messages?.reduce(
+            (acc, m, i) => (m.role === "user" ? i : acc),
+            -1,
+          ) ?? -1;
+
+        /**
+         * Mirrors the assistant branches in messages.map that return null, so we can pick exactly
+         * one "Superblocks" label per user turn (first visible assistant row after that user).
+         */
+        const assistantRowWouldRender = (originalIndex: number): boolean => {
+          if (
+            !messages ||
+            originalIndex < 0 ||
+            originalIndex >= messages.length
+          ) {
+            return false;
+          }
+          const msg = messages[originalIndex];
+          if (msg.role !== "assistant") return false;
+
+          const isLastMessage = originalIndex === messages.length - 1;
+          const isGenerateImage =
+            msg.toolResult?.UsedTool === "generate_image";
+
+          if (isGenerateImage && isLastMessage && isStreamActive) {
+            return false;
+          }
+
+          if (
+            msg.toolResult?.UsedTool === "code_read" ||
+            msg.toolResult?.UsedTool === "webfetch" ||
+            msg.toolResult?.UsedTool === "todo_read" ||
+            msg.toolResult?.UsedTool === "get_code" ||
+            msg.toolResult?.UsedTool ===
+              "WebScreenShotAndReadWebsiteTool" ||
+            (msg as Message & { usedTool?: string }).usedTool ===
+              "WebScreenShotAndReadWebsiteTool" ||
+            msg.toolResult?.UsedTool === "get_project_attachment" ||
+            msg.toolResult?.UsedTool === "issue_write" ||
+            isGithubTool(msg.toolResult?.UsedTool) ||
+            (msg.content &&
+              /Executed/i.test(msg.content) &&
+              msg.toolResult?.UsedTool !== "generate_image") ||
+            (msg.toolResult?.UsedTool &&
+              msg.toolResult?.result?.success === false &&
+              (msg.toolResult?.result as { error?: string }).error?.includes(
+                "not found",
+              ))
+          ) {
+            return false;
+          }
+
+          const hasText =
+            typeof msg.content === "string" && msg.content.trim().length > 0;
+          const renderableAttachments = filterRenderableAttachments(
+            msg.attachments,
+          );
+          const hasAttachments = renderableAttachments.length > 0;
+          const messageFileWritesForVisibility =
+            extractMessageFileWrites(msg);
+          const hasRenderableFileWrites =
+            messageFileWritesForVisibility.length > 0;
+
+          const imageUrl =
+            (msg.toolResult?.result as { imageUrl?: string })?.imageUrl ||
+            (msg.toolResult?.result as { url?: string })?.url ||
+            (msg.toolResult?.result as { attachments?: { url?: string }[] })
+              ?.attachments?.[0]?.url;
+          const hasGeneratedImage =
+            msg.toolResult?.UsedTool === "generate_image" && !!imageUrl;
+
+          if (
+            msg.toolResult?.UsedTool === "generate_image" &&
+            !imageUrl &&
+            !hasText &&
+            !hasAttachments
+          ) {
+            return false;
+          }
+
+          if (hasRenderableFileWrites) {
+            const isFirstInGroup =
+              originalIndex === 0 ||
+              extractMessageFileWrites(messages[originalIndex - 1]!).length ===
+                0;
+            if (!isFirstInGroup) {
+              const hasVisibleAssistantText =
+                typeof msg.content === "string" &&
+                msg.content.trim().length > 0;
+              if (!hasVisibleAssistantText) return false;
+            }
+          }
+
+          const inCurrentReplyTail =
+            isStreamActive &&
+            streamChatId === chatId &&
+            latestUserMessageIndex >= 0 &&
+            originalIndex > latestUserMessageIndex;
+
+          if (
+            isStreamActive &&
+            streamChatId === chatId &&
+            msg.toolResult?.UsedTool === "todo_write" &&
+            !hasText &&
+            !hasRenderableFileWrites &&
+            !hasAttachments &&
+            !hasGeneratedImage
+          ) {
+            return false;
+          }
+
+          const hasTodoCard =
+            msg.toolResult?.UsedTool === "todo_write" &&
+            (msg.toolResult?.result?.metadata?.todos?.length ?? 0) > 0 &&
+            !(inCurrentReplyTail && msg.role === "assistant");
+
+          if (
+            !hasText &&
+            !hasAttachments &&
+            !hasGeneratedImage &&
+            !hasRenderableFileWrites &&
+            !hasTodoCard
+          ) {
+            return false;
+          }
+
+          return true;
+        };
+
+        const userTurnFirstVisibleAssistant = new Map<number, number>();
+        if (messages && messages.length > 0) {
+          for (let u = 0; u < messages.length; u++) {
+            if (messages[u].role !== "user") continue;
+            for (let i = u + 1; i < messages.length; i++) {
+              if (messages[i].role === "user") break;
+              if (
+                messages[i].role === "assistant" &&
+                assistantRowWouldRender(i)
+              ) {
+                userTurnFirstVisibleAssistant.set(u, i);
+                break;
+              }
+            }
+          }
+        }
+
+        const superblocksLeadIndexForAssistant = (
+          assistantIndex: number,
+        ): number | undefined => {
+          if (!messages || messages.length === 0) return undefined;
+          let prevUser = -1;
+          for (let j = assistantIndex; j >= 0; j--) {
+            if (messages[j].role === "user") {
+              prevUser = j;
+              break;
+            }
+          }
+          if (prevUser >= 0) {
+            return userTurnFirstVisibleAssistant.get(prevUser);
+          }
+          for (let i = 0; i < messages.length; i++) {
+            if (messages[i].role === "user") break;
+            if (
+              messages[i].role === "assistant" &&
+              assistantRowWouldRender(i)
+            ) {
+              return i;
+            }
+          }
+          return undefined;
+        };
+
+        const isLastAssistantBeforeNextUser = (i: number): boolean => {
+          if (!messages || i < 0 || i >= messages.length) return false;
+          if (messages[i].role !== "assistant") return false;
+          const next = messages[i + 1];
+          return !next || next.role === "user";
+        };
+
+        /** Duration for the user prompt whose assistant block ends at index `i` (i = last assistant of that turn). */
+        const durationMsBannerForTurnEndingAt = (i: number): number | null => {
+          if (!messages || !isLastAssistantBeforeNextUser(i)) return null;
+          let prevUser = -1;
+          for (let j = i; j >= 0; j--) {
+            if (messages[j].role === "user") {
+              prevUser = j;
+              break;
+            }
+          }
+          for (let j = i; j > prevUser; j--) {
+            const d = messages[j].agentRun?.durationMs;
+            if (typeof d === "number" && d > 0) return d;
+          }
+          return null;
+        };
+
+        const showLiveTasksPanel =
+          isStreamActive &&
+          streamChatId === chatId &&
+          reduxTodos.length > 0;
+
         if (messages && messages.length > 0) {
           return (
             <>
@@ -989,25 +1283,23 @@ const Messages = () => {
                 }
 
                 if (
-                  msg.toolResult?.UsedTool === "code_write" ||
                   msg.toolResult?.UsedTool === "code_read" ||
-                  msg.toolResult?.UsedTool === "todo_write" ||
                   msg.toolResult?.UsedTool === "webfetch" ||
                   msg.toolResult?.UsedTool === "todo_read" ||
                   msg.toolResult?.UsedTool === "get_code" ||
                   msg.toolResult?.UsedTool ===
                     "WebScreenShotAndReadWebsiteTool" ||
-                  (msg as any).usedTool === "WebScreenShotAndReadWebsiteTool" ||
+                  (msg as Message & { usedTool?: string }).usedTool ===
+                    "WebScreenShotAndReadWebsiteTool" ||
                   msg.toolResult?.UsedTool === "get_project_attachment" ||
                   msg.toolResult?.UsedTool === "issue_write" ||
                   isGithubTool(msg.toolResult?.UsedTool) ||
-                  // Hide messages containing "Executed" text
                   (msg.content &&
                     /Executed/i.test(msg.content) &&
                     msg.toolResult?.UsedTool !== "generate_image") ||
                   (msg.toolResult?.UsedTool &&
                     msg.toolResult?.result?.success === false &&
-                    (msg.toolResult?.result as any)?.error?.includes(
+                    (msg.toolResult?.result as { error?: string }).error?.includes(
                       "not found",
                     ))
                 ) {
@@ -1021,11 +1313,16 @@ const Messages = () => {
                   msg.attachments,
                 );
                 const hasAttachments = renderableAttachments.length > 0;
+                const messageFileWritesForVisibility =
+                  extractMessageFileWrites(msg);
+                const hasRenderableFileWrites =
+                  messageFileWritesForVisibility.length > 0;
 
                 const imageUrl =
-                  (msg.toolResult?.result as any)?.imageUrl ||
-                  (msg.toolResult?.result as any)?.url ||
-                  (msg.toolResult?.result as any)?.attachments?.[0]?.url;
+                  (msg.toolResult?.result as { imageUrl?: string })?.imageUrl ||
+                  (msg.toolResult?.result as { url?: string })?.url ||
+                  (msg.toolResult?.result as { attachments?: { url?: string }[] })
+                    ?.attachments?.[0]?.url;
                 const hasGeneratedImage =
                   msg.toolResult?.UsedTool === "generate_image" && !!imageUrl;
 
@@ -1038,47 +1335,51 @@ const Messages = () => {
                   return null;
                 }
 
+                if (hasRenderableFileWrites) {
+                  const isFirstInGroup =
+                    originalIndex === 0 ||
+                    extractMessageFileWrites(messages[originalIndex - 1]!)
+                      .length === 0;
+                  if (!isFirstInGroup) {
+                    const hasVisibleAssistantText =
+                      typeof msg.content === "string" &&
+                      msg.content.trim().length > 0;
+                    if (!hasVisibleAssistantText) return null;
+                  }
+                }
+
+                const inCurrentReplyTail =
+                  isStreamActive &&
+                  streamChatId === chatId &&
+                  latestUserMessageIndex >= 0 &&
+                  originalIndex > latestUserMessageIndex;
+
                 if (
-                  msg.role !== "user" &&
+                  isStreamActive &&
+                  streamChatId === chatId &&
+                  msg.role === "assistant" &&
+                  msg.toolResult?.UsedTool === "todo_write" &&
                   !hasText &&
+                  !hasRenderableFileWrites &&
                   !hasAttachments &&
                   !hasGeneratedImage
                 ) {
                   return null;
                 }
 
-                // Handle code_write messages - render file writes inline
-                if (msg.toolResult?.UsedTool === "code_write") {
-                  // Check if this is the start of a file write group
-                  const fileWrites = fileWriteMap.get(originalIndex);
-                  if (fileWrites && fileWrites.length > 0) {
-                    // Only render if this is the first message in the group (to avoid duplicates)
-                    // Check if the previous message is also a code_write
-                    const isFirstInGroup =
-                      originalIndex === 0 ||
-                      messages[originalIndex - 1]?.toolResult?.UsedTool !==
-                        "code_write";
+                const hasTodoCard =
+                  msg.toolResult?.UsedTool === "todo_write" &&
+                  (msg.toolResult?.result?.metadata?.todos?.length ?? 0) > 0 &&
+                  !(inCurrentReplyTail && msg.role === "assistant");
 
-                    if (isFirstInGroup) {
-                      return (
-                        <div
-                          key={`file-write-inline-${originalIndex}`}
-                          className="w-full justify-start flex flex-col items-start gap-2"
-                        >
-                          <div className="flex justify-center items-start flex-col gap-2 max-w-[80%]">
-                            {shouldShowHeader(originalIndex) && (
-                              <p
-                                className={`font-sans font-medium text-xs text-gray-400`}
-                              >
-                                Superblocks
-                              </p>
-                            )}
-                            <FileWrites fileWrites={fileWrites} />
-                          </div>
-                        </div>
-                      );
-                    }
-                  }
+                if (
+                  msg.role !== "user" &&
+                  !hasText &&
+                  !hasAttachments &&
+                  !hasGeneratedImage &&
+                  !hasRenderableFileWrites &&
+                  !hasTodoCard
+                ) {
                   return null;
                 }
 
@@ -1158,46 +1459,103 @@ const Messages = () => {
                     msg.content,
                     renderableAttachments,
                   );
+                  const metaTodos = msg.toolResult?.result?.metadata;
+                  const rawSnapTodos = metaTodos?.todos || [];
+                  const fromSnapTodos: Todo[] = rawSnapTodos.map(
+                    (t: {
+                      id: string;
+                      content: string;
+                      status?: string;
+                    }) => ({
+                      id: String(t.id),
+                      content: String(t.content || ""),
+                      status:
+                        t.status === "completed" ||
+                        t.status === "in_progress" ||
+                        t.status === "pending"
+                          ? t.status
+                          : "pending",
+                    }),
+                  );
+                  const groupedFw = fileWriteMap.get(originalIndex);
+                  const showGroupedFileWrites = !!(
+                    hasRenderableFileWrites &&
+                    groupedFw &&
+                    groupedFw.length > 0 &&
+                    (originalIndex === 0 ||
+                      extractMessageFileWrites(messages[originalIndex - 1]!)
+                        .length === 0)
+                  );
+
+                  const showTasksCardInsideRow =
+                    msg.toolResult?.UsedTool === "todo_write" &&
+                    fromSnapTodos.length > 0 &&
+                    !(inCurrentReplyTail && reduxTodos.length > 0);
+
+                  const displayTodosInline: Todo[] = fromSnapTodos;
+
+                  const activeTodoCount = displayTodosInline.filter(
+                    (t) => t.status !== "completed",
+                  ).length;
+
+                  const assistantMarkdownSource =
+                    typeof msg.content === "string"
+                      ? stripRedundantAssistantProse(msg.content, {
+                          stripWroteFiles: hasRenderableFileWrites,
+                          stripTasksHeading: showTasksCardInsideRow,
+                          stripFileEchoLines: true,
+                        })
+                      : msg.content;
+
+                  const showMarkdownBlock =
+                    typeof assistantMarkdownSource === "string" &&
+                    assistantMarkdownSource.trim().length > 0 &&
+                    !shouldHideAssistantText &&
+                    msg.toolResult?.UsedTool !== "generate_image";
+
+                  const turnBannerMs =
+                    durationMsBannerForTurnEndingAt(originalIndex);
+
+                  const prevInThread =
+                    originalIndex > 0 ? messages[originalIndex - 1] : undefined;
+                  const prevAssistantHadFileWrites =
+                    prevInThread?.role === "assistant" &&
+                    extractMessageFileWrites(prevInThread).length > 0;
+                  /**
+                   * One user turn can be split into DB rows: file-write row(s) then a final text row.
+                   * The text row still qualifies as "first visible after user" for header math unless we
+                   * suppress — it already has "Superblocks" on the file-group start row.
+                   */
+                  const suppressSuperblocksAsFileGroupTail =
+                    prevAssistantHadFileWrites &&
+                    !showGroupedFileWrites &&
+                    (showMarkdownBlock || turnBannerMs != null);
+                  const superblocksLeadIdx =
+                    superblocksLeadIndexForAssistant(originalIndex);
+                  const showSuperblocksLabel =
+                    !suppressSuperblocksAsFileGroupTail &&
+                    superblocksLeadIdx !== undefined &&
+                    originalIndex === superblocksLeadIdx;
+
                   return (
                     <div
                       key={msg.id || originalIndex}
-                      className="w-full justify-start flex flex-col items-start gap-2"
+                      className="w-full min-w-0 justify-start flex flex-col items-stretch gap-2"
                     >
-                      <div className="flex justify-center items-start flex-col gap-2 max-w-full">
-                        {shouldShowHeader(originalIndex) && (
+                      <div className="flex w-full min-w-0 flex-col items-stretch gap-2 max-w-full">
+                        {showSuperblocksLabel && (
                           <p
                             className={`font-sans font-medium text-xs text-gray-400`}
                           >
                             Superblocks
                           </p>
                         )}
-                        {/* Note: Todos are now displayed in Keyboard component, not in messages */}
-                        {/* Render image if generate_image tool result exists */}
-                        {msg.toolResult?.UsedTool === "generate_image" &&
-                          (() => {
-                            const imageUrl =
-                              (msg.toolResult?.result as any)?.imageUrl ||
-                              (msg.toolResult?.result as any)?.url ||
-                              (msg.toolResult?.result as any)?.attachments?.[0]
-                                ?.url;
-                            const label =
-                              (msg.toolResult?.result as any)?.label ||
-                              "Generated image";
-                            return (
-                              imageUrl && (
-                                <CollapsibleImage src={imageUrl} alt={label} />
-                              )
-                            );
-                          })()}
-                        {/* Attachments for AI messages */}
-                        <MessageAttachments
-                          attachments={renderableAttachments}
-                          alignment="start"
-                        />
 
-                        {msg.content &&
-                          !shouldHideAssistantText &&
-                          msg.toolResult?.UsedTool !== "generate_image" && (
+                        {turnBannerMs != null && (
+                          <AgentRunBanner durationMs={turnBannerMs} />
+                        )}
+
+                        {showMarkdownBlock && (
                             <div
                               className={`break-words w-full text-start prose prose-invert prose-sm max-w-none text-white/80`}
                             >
@@ -1348,15 +1706,118 @@ const Messages = () => {
                                   ),
                                 }}
                               >
-                                {msg.content}
+                                {assistantMarkdownSource}
                               </ReactMarkdown>
                             </div>
                           )}
+
+                        {showGroupedFileWrites && groupedFw && (
+                          <FileWrites fileWrites={groupedFw} />
+                        )}
+
+                        {showTasksCardInsideRow &&
+                          displayTodosInline.length > 0 && (
+                          <div className="w-full border border-[#262626] rounded-lg px-3 py-2 bg-zinc-950/50 max-w-[85%]">
+                            <p className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1.5">
+                              Tasks · {activeTodoCount} active ·{" "}
+                              {displayTodosInline.length} total
+                            </p>
+                            <ul className="space-y-1 max-h-48 overflow-y-auto text-xs text-zinc-300">
+                              {displayTodosInline.map((t) => (
+                                <li
+                                  key={t.id}
+                                  className="flex items-start gap-2"
+                                >
+                                  <span className="text-zinc-500 shrink-0 w-3">
+                                    {t.status === "completed"
+                                      ? "✓"
+                                      : t.status === "in_progress"
+                                        ? "…"
+                                        : "○"}
+                                  </span>
+                                  <span
+                                    className={
+                                      t.status === "completed"
+                                        ? "line-through text-zinc-500"
+                                        : ""
+                                    }
+                                  >
+                                    {t.content}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                          )}
+
+                        {msg.toolResult?.UsedTool === "generate_image" &&
+                          (() => {
+                            const genImageUrl =
+                              (msg.toolResult?.result as any)?.imageUrl ||
+                              (msg.toolResult?.result as any)?.url ||
+                              (msg.toolResult?.result as any)?.attachments?.[0]
+                                ?.url;
+                            const label =
+                              (msg.toolResult?.result as any)?.label ||
+                              "Generated image";
+                            return (
+                              genImageUrl && (
+                                <CollapsibleImage
+                                  src={genImageUrl}
+                                  alt={label}
+                                />
+                              )
+                            );
+                          })()}
+
+                        <MessageAttachments
+                          attachments={renderableAttachments}
+                          alignment="start"
+                        />
                       </div>
                     </div>
                   );
                 }
               })}
+              {showLiveTasksPanel && (
+                <div
+                  key={`live-task-panel-${chatId || "session"}`}
+                  className="w-full justify-start flex flex-col items-start gap-2"
+                >
+                  <div className="w-full border border-[#262626] rounded-lg px-3 py-2 bg-zinc-950/50 max-w-[85%]">
+                    <p className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1.5">
+                      Tasks ·{" "}
+                      {
+                        reduxTodos.filter((t) => t.status !== "completed")
+                          .length
+                      }{" "}
+                      active · {reduxTodos.length} total
+                    </p>
+                    <ul className="space-y-1 max-h-48 overflow-y-auto text-xs text-zinc-300">
+                      {reduxTodos.map((t) => (
+                        <li key={t.id} className="flex items-start gap-2">
+                          <span className="text-zinc-500 shrink-0 w-3">
+                            {t.status === "completed"
+                              ? "✓"
+                              : t.status === "in_progress"
+                                ? "…"
+                                : "○"}
+                          </span>
+                          <span
+                            className={
+                              t.status === "completed"
+                                ? "line-through text-zinc-500"
+                                : ""
+                            }
+                          >
+                            {t.content}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
               {/* Single shimmer component - shows only one shimmer at a time */}
               {(() => {
                 const activeShimmer = getActiveShimmer();
@@ -1498,7 +1959,6 @@ const Messages = () => {
           (msg) =>
             msg.toolResult?.UsedTool !== "code_write" &&
             msg.toolResult?.UsedTool !== "code_read" &&
-            msg.toolResult?.UsedTool !== "todo_write" &&
             msg.toolResult?.UsedTool !== "webfetch" &&
             !isGithubTool(msg.toolResult?.UsedTool) &&
             msg.toolResult?.UsedTool !== "WebScreenShotAndReadWebsiteTool" &&
@@ -1517,7 +1977,6 @@ const Messages = () => {
             (msg) =>
               msg.toolResult?.UsedTool === "code_write" ||
               msg.toolResult?.UsedTool === "code_read" ||
-              msg.toolResult?.UsedTool === "todo_write" ||
               msg.toolResult?.UsedTool === "webfetch" ||
               msg.toolResult?.UsedTool === "todo_read" ||
               isGithubTool(msg.toolResult?.UsedTool) ||

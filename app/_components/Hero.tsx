@@ -388,11 +388,14 @@ const Hero = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const previewDropdownRef = useRef<HTMLDivElement>(null);
-  const checkRef = useRef<boolean>(false);
 
   const { isAuthenticated, email } = useAuthenticated();
 
-  const { needsUpgrade, checkSubscriptionStatus } = useSubscriptionCheck({
+  const {
+    needsUpgrade,
+    needsUpgradePending,
+    checkSubscriptionStatus,
+  } = useSubscriptionCheck({
     isAuthenticated: isAuthenticated.value,
     email: email?.value || "",
   });
@@ -701,18 +704,11 @@ const Hero = () => {
     }
   };
 
-  const checkStatus = useCallback(async () => {
-    if (isAuthenticated.value && email.value && !checkRef.current) {
-      checkRef.current = true;
-      await checkSubscriptionStatus();
-    }
-  }, [email.value, isAuthenticated.value, checkSubscriptionStatus]);
-
   useEffect(() => {
-    // Only check subscription status once when component mounts
-    checkStatus();
+    if (isAuthenticated.value && email.value) {
+      void checkSubscriptionStatus();
+    }
 
-    // Cleanup function for attachments
     return () => {
       attachments.forEach((attachment) => {
         if (attachment.preview) {
@@ -720,125 +716,133 @@ const Hero = () => {
         }
       });
     };
-  }, [email.value, checkStatus, attachments]);
+  }, [
+    isAuthenticated.value,
+    email.value,
+    checkSubscriptionStatus,
+    attachments,
+  ]);
 
   const handleGenerate = useCallback(async () => {
-    setLoading(true);
-    // Check if any attachments are still uploading
     if (attachments.some((att) => att.isUploading)) {
       dispatch(
         setNotification({
           modalOpen: true,
           status: "error",
           text: "Please wait for all attachments to finish uploading.",
-        })
+        }),
       );
       return;
     }
-    sessionStorage.clear();
     if (loading || !input.trim()) return;
     if (!isAuthenticated.value) {
       return router.push("/login");
     }
-    const attachmentUrls = attachments
-      .filter((att) => !att.isUploading && att.url)
-      .slice(0, 2)
-      .map((att) => att.url);
 
-    const userPrompt = input.trim();
+    const quotaBlocked = await checkSubscriptionStatus();
+    if (quotaBlocked) {
+      dispatch(setPricingModalOpen(true));
+      return;
+    }
 
-    sessionStorage.setItem("input", userPrompt);
-    sessionStorage.setItem("model", selectedModel);
-    const characters = "abcdefghijklmnopqrstuvwxyz123456789";
-    const generateSegment = (length: number) =>
-      Array.from({ length }, () =>
-        characters.charAt(Math.floor(Math.random() * characters.length))
-      ).join("");
-
-    const projectId = `${generateSegment(8)}-${generateSegment(8)}-${generateSegment(8)}-${generateSegment(8)}`;
-
-    const payload = {
-      prompt: userPrompt,
-      model: selectedModel,
-      attachments: attachmentUrls,
-      attachmentCount: attachmentUrls.length,
-      projectId,
-      session: email.value || undefined,
-      startingPoint: selectedStartingPoint?.id || null,
-      previewRuntime: landingPreview,
-      platform: landingPreview,
-    };
-
-    // Create user message object
-    const userMessage: Message = {
-      id: `msg-${Date.now()}-${Math.random()}`,
-      role: "user",
-      content: userPrompt,
-      createdAt: new Date().toISOString(), // Add timestamp when message is created
-      attachments: attachments
+    setLoading(true);
+    try {
+      sessionStorage.clear();
+      const attachmentUrls = attachments
         .filter((att) => !att.isUploading && att.url)
-        .map((att) => ({
-          name: att.name,
-          url: att.url,
-          type: att.type,
-        })),
-    };
+        .slice(0, 2)
+        .map((att) => att.url);
 
-    // Store payload and message in sessionStorage for this project
-    const sessionData = {
-      payload,
-      message: userMessage,
-      projectId,
-      model: selectedModel,
-      startingPoint: selectedStartingPoint?.id || null,
-      previewRuntime: landingPreview,
-    };
-    sessionStorage.setItem(
-      `superblocksMessage_${projectId}`,
-      JSON.stringify(sessionData)
-    );
+      const userPrompt = input.trim();
 
-    const result = await createProject(payload);
+      sessionStorage.setItem("input", userPrompt);
+      sessionStorage.setItem("model", selectedModel);
+      const characters = "abcdefghijklmnopqrstuvwxyz123456789";
+      const generateSegment = (length: number) =>
+        Array.from({ length }, () =>
+          characters.charAt(Math.floor(Math.random() * characters.length)),
+        ).join("");
 
-    if (result.success) {
-      dispatch(clearMessages());
-      dispatch(clearAllFiles());
+      const projectId = `${generateSegment(8)}-${generateSegment(8)}-${generateSegment(8)}-${generateSegment(8)}`;
 
-      dispatch(setChatHidden(false));
+      const payload = {
+        prompt: userPrompt,
+        model: selectedModel,
+        attachments: attachmentUrls,
+        attachmentCount: attachmentUrls.length,
+        projectId,
+        session: email.value || undefined,
+        startingPoint: selectedStartingPoint?.id || null,
+        previewRuntime: landingPreview,
+        platform: landingPreview,
+      };
 
-      if (result.chatName && result.chatId) {
-        sessionStorage.setItem("chatName", result.chatName);
-        sessionStorage.setItem("chatId", result.chatId);
-        dispatch(setTitle(result.projectTitle as string));
-        dispatch(setChatId(result.chatId));
-      }
-      // Check if upgrade is needed
-      if (result.upgradeNeeded === false) {
+      const userMessage: Message = {
+        id: `msg-${Date.now()}-${Math.random()}`,
+        role: "user",
+        content: userPrompt,
+        createdAt: new Date().toISOString(),
+        attachments: attachments
+          .filter((att) => !att.isUploading && att.url)
+          .map((att) => ({
+            name: att.name,
+            url: att.url,
+            type: att.type,
+          })),
+      };
+
+      const sessionData = {
+        payload,
+        message: userMessage,
+        projectId,
+        model: selectedModel,
+        startingPoint: selectedStartingPoint?.id || null,
+        previewRuntime: landingPreview,
+      };
+      sessionStorage.setItem(
+        `superblocksMessage_${projectId}`,
+        JSON.stringify(sessionData),
+      );
+
+      const result = await createProject(payload);
+
+      if (result.success) {
+        dispatch(clearMessages());
+        dispatch(clearAllFiles());
+
+        dispatch(setChatHidden(false));
+
+        if (result.chatName && result.chatId) {
+          sessionStorage.setItem("chatName", result.chatName);
+          sessionStorage.setItem("chatId", result.chatId);
+          dispatch(setTitle(result.projectTitle as string));
+          dispatch(setChatId(result.chatId));
+        }
+        if (result.upgradeNeeded === false) {
+          await checkSubscriptionStatus();
+          dispatch(setPricingModalOpen(true));
+          return;
+        }
+        window.location.href = `/projects/${projectId}`;
+      } else {
         dispatch(
           setNotification({
             modalOpen: true,
-            status: "info",
-            text: "Upgrade needed to create this project.",
-          })
+            status: "error",
+            text:
+              result.message || "Failed to create project. Please try again.",
+          }),
         );
-        setLoading(false);
-        return;
-      } else {
-        window.location.href = `/projects/${projectId}`;
       }
-    } else {
-      dispatch(
-        setNotification({
-          modalOpen: true,
-          status: "error",
-          text: result.message || "Failed to create project. Please try again.",
-        })
-      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [
     loading,
     input,
+    attachments,
+    email.value,
+    isAuthenticated.value,
     memory,
     framework,
     cssLibrary,
@@ -847,6 +851,7 @@ const Hero = () => {
     landingPreview,
     dispatch,
     router,
+    checkSubscriptionStatus,
   ]);
 
   const startListening = async () => {
@@ -1313,17 +1318,36 @@ const Hero = () => {
           variants={inputBoxVariants}
           className="w-full space-y-4 max-md:px-4"
         >
-          {needsUpgrade === true && (
+          {needsUpgradePending && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3 }}
-              className="justify-center items-center flex text-center p-2 rounded-lg bg-[#1c1c1d] backdrop-blur-sm shadow-lg my-1"
+              className="flex justify-center items-center gap-2 text-center p-2 rounded-lg bg-[#1c1c1d] backdrop-blur-sm shadow-lg my-1"
             >
-              <div className="flex items-center gap-2 text-xs sm:text-sm font-sans font-medium text-white">
-                You&rsquo;ve reached your prompt limit. Upgrade to Scale for 100 messages.
-              </div>
+              <LuLoaderCircle className="h-3.5 w-3.5 animate-spin text-[#8C8C8C]" />
+              <span className="text-xs sm:text-sm font-sans font-medium text-[#b1b1b1]">
+                Checking your plan…
+              </span>
             </motion.div>
+          )}
+          {needsUpgrade === true && (
+            <motion.button
+              type="button"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+              onClick={() => dispatch(setPricingModalOpen(true))}
+              className="w-full justify-center items-center flex text-center p-2.5 rounded-lg bg-[#1c1c1d] backdrop-blur-sm shadow-lg my-1 border border-[#2a2a2b] hover:border-[#4a90e2]/50 transition-colors cursor-pointer"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 text-xs sm:text-sm font-sans font-medium text-white">
+                <span>
+                  You&rsquo;re out of prompts for this billing cycle. Open plans
+                  to upgrade or renew.
+                </span>
+                <span className="text-[#4F92E1] sm:underline">View pricing</span>
+              </div>
+            </motion.button>
           )}
           {/*  TEXT INPUT (FIRST) */}
           <div className="bg-[#141415] relative rounded-xl p-4 flex flex-col items-start justify-center shadow-lg sm:min-h-[150px] md:min-h-[250px] max-h-[250px] w-full">
@@ -1724,7 +1748,7 @@ const Hero = () => {
       {/* Pricing */}
       <section
         id="pricing"
-        className="justify-center max-md:px-4  items-center flex flex-col w-full max-w-4xl mx-auto py-20"
+        className="justify-center max-md:px-4 items-center flex flex-col w-full max-w-4xl mx-auto py-12 sm:py-16"
       >
         <motion.div
           initial="hidden"
@@ -1732,11 +1756,11 @@ const Hero = () => {
           variants={mainContentVariants}
           className="w-full"
         >
-          <div className="text-center mb-16">
-            <h2 className="text-2xl md:text-4xl font-bold text-white mb-4">
+          <div className="text-center mb-8 sm:mb-10">
+            <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">
               Simple, Transparent Pricing
             </h2>
-            <p className="text-[#b1b1b1] text-sm sm:text-base max-w-2xl mx-auto">
+            <p className="text-[#b1b1b1] text-sm sm:text-base max-w-2xl mx-auto leading-snug">
               Choose the plan that fits your needs. Start free, upgrade when
               you&apos;re ready to scale.
             </p>
@@ -1848,18 +1872,18 @@ const Hero = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.2 }}
-              className="bg-[#141415] border border-[#4a90e2] rounded-xl p-8 hover:border-[#5ba0f2] transition-all duration-300 relative"
+              className="bg-[#141415] border border-[#4a90e2] rounded-xl p-5 sm:p-6 hover:border-[#5ba0f2] transition-all duration-300 relative max-w-md w-full"
             >
-              <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                <div className="bg-[#4a90e2] text-white px-3 py-1 rounded-full text-xs font-medium">
+              <div className="absolute -top-2.5 left-1/2 transform -translate-x-1/2">
+                <div className="bg-[#4a90e2] text-white px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-medium">
                   Most Popular
                 </div>
               </div>
 
-              <div className="mb-6">
-                <div className="flex items-center gap-2 mb-2">
+              <div className="mb-4 pt-1">
+                <div className="flex items-center gap-2 mb-1.5">
                   <svg
-                    className="w-5 h-5 text-[#4a90e2]"
+                    className="w-4 h-4 text-[#4a90e2] shrink-0"
                     fill="currentColor"
                     viewBox="0 0 20 20"
                   >
@@ -1869,20 +1893,22 @@ const Hero = () => {
                       clipRule="evenodd"
                     />
                   </svg>
-                  <h3 className="text-xl font-semibold text-white">Scale</h3>
+                  <h3 className="text-lg font-semibold text-white">Scale</h3>
                 </div>
-                <div className="text-3xl font-bold text-white mb-2">
+                <div className="text-2xl sm:text-3xl font-bold text-white mb-1">
                   $29
-                  <span className="text-lg font-normal text-[#71717A]">
+                  <span className="text-base sm:text-lg font-normal text-[#71717A]">
                     /month
                   </span>
                 </div>
-                <p className="text-[#b1b1b1] text-sm">
-                  Expand your build capacity with 100 messages every billing cycle
+                <p className="text-[#b1b1b1] text-xs sm:text-sm leading-snug">
+                  Expand your build capacity with 100 messages every billing
+                  cycle
                 </p>
               </div>
 
               <button
+                type="button"
                 onClick={() => {
                   if (!isAuthenticated.value) {
                     router.push("/login");
@@ -1890,39 +1916,39 @@ const Hero = () => {
                     dispatch(setPricingModalOpen(true));
                   }
                 }}
-                className="w-full cursor-pointer bg-white text-black py-3 rounded-lg font-medium text-sm hover:bg-gray-100 transition-colors mb-6"
+                className="w-full cursor-pointer bg-white text-black py-2.5 rounded-lg font-medium text-sm hover:bg-gray-100 transition-colors mb-4"
               >
                 Upgrade to Scale
               </button>
 
-              <div className="mb-6">
-                <p className="text-[#71717A] text-xs font-medium mb-4">
-                  BENEFITS
+              <div className="mb-2">
+                <p className="text-[#71717A] text-[10px] sm:text-xs font-medium uppercase tracking-wide">
+                  Benefits
                 </p>
               </div>
 
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0"></span>
-                  <span className="text-white text-sm">
+              <div className="space-y-2.5">
+                <div className="flex items-start gap-2.5">
+                  <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
+                  <span className="text-white text-xs sm:text-sm leading-snug">
                     100 messages / billing cycle
                   </span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0"></span>
-                  <span className="text-white text-sm">
+                <div className="flex items-start gap-2.5">
+                  <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
+                  <span className="text-white text-xs sm:text-sm leading-snug">
                     Priority customer support with faster response times
                   </span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0"></span>
-                  <span className="text-white text-sm">
+                <div className="flex items-start gap-2.5">
+                  <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
+                  <span className="text-white text-xs sm:text-sm leading-snug">
                     Every user starts on Free with 5 prompts
                   </span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0"></span>
-                  <span className="text-white text-sm">
+                <div className="flex items-start gap-2.5">
+                  <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
+                  <span className="text-white text-xs sm:text-sm leading-snug">
                     Manage billing directly in Stripe
                   </span>
                 </div>

@@ -78,12 +78,12 @@ const PricingModal: React.FC = () => {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
             transition={{ duration: 0.3, ease: "easeOut" }}
-            className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-[#141415] p-8 rounded-2xl shadow-2xl border border-[#2a2a2b] w-full max-w-lg z-50 backdrop-blur-sm"
+            className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-[#141415] p-5 sm:p-6 rounded-2xl shadow-2xl border border-[#2a2a2b] w-[calc(100%-1.5rem)] max-w-lg max-h-[min(88vh,640px)] overflow-y-auto z-50 backdrop-blur-sm"
           >
             {/* Close Button */}
             <button
               onClick={() => dispatch(setPricingModalOpen(false))}
-              className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-[#2a2a2b] hover:bg-[#3a3a3b] transition-colors duration-200 group"
+              className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full bg-[#2a2a2b] hover:bg-[#3a3a3b] transition-colors duration-200 group"
             >
               <svg
                 className="w-4 h-4 text-[#8C8C8C] group-hover:text-white transition-colors duration-200"
@@ -101,10 +101,10 @@ const PricingModal: React.FC = () => {
             </button>
 
             {/* Header Section */}
-            <div className="text-center mb-8">
-              <div className="w-16 h-16 bg-gradient-to-br from-[#4a90e2] to-[#5ba0f2] rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="text-center mb-4">
+              <div className="w-11 h-11 bg-gradient-to-br from-[#4a90e2] to-[#5ba0f2] rounded-full flex items-center justify-center mx-auto mb-2">
                 <svg
-                  className="w-8 h-8 text-white"
+                  className="w-5 h-5 text-white"
                   fill="currentColor"
                   viewBox="0 0 20 20"
                 >
@@ -115,37 +115,37 @@ const PricingModal: React.FC = () => {
                   />
                 </svg>
               </div>
-              <h3 className="text-3xl font-bold text-white mb-2 font-[insSerifIt]">
+              <h3 className="text-2xl font-bold text-white mb-1 font-[insSerifIt]">
                 Scale
               </h3>
-              <p className="text-[#b1b1b1] text-base font-sans">
+              <p className="text-[#b1b1b1] text-sm font-sans leading-snug px-1">
                 100 messages per billing cycle for teams ready to ship faster
               </p>
             </div>
 
             {/* Price Section */}
-            <div className="text-center mb-8 p-6 bg-[#1c1c1d] rounded-xl border border-[#2a2a2b]">
-              <div className="text-4xl font-bold text-white mb-2">
+            <div className="text-center mb-4 py-3 px-4 bg-[#1c1c1d] rounded-xl border border-[#2a2a2b]">
+              <div className="text-3xl font-bold text-white mb-0.5">
                 $29
-                <span className="text-xl font-normal text-[#71717A] ml-2">
+                <span className="text-lg font-normal text-[#71717A] ml-1.5">
                   /month
                 </span>
               </div>
-              <p className="text-sm text-[#8C8C8C]">
+              <p className="text-xs text-[#8C8C8C]">
                 Built for consistent weekly usage
               </p>
             </div>
 
             {/* Features Grid */}
-            <div className="mb-8">
-              <h4 className="text-lg font-semibold text-white mb-4 text-center">
+            <div className="mb-4">
+              <h4 className="text-base font-semibold text-white mb-2 text-center">
                 What&apos;s included
               </h4>
-              <div className="grid grid-cols-1 gap-4">
-                <div className="flex items-center gap-4 p-3 bg-[#1c1c1d] rounded-lg border border-[#2a2a2b]">
-                  <div className="w-8 h-8 bg-[#4a90e2] rounded-full flex items-center justify-center flex-shrink-0">
+              <div className="grid grid-cols-1 gap-2">
+                <div className="flex items-center gap-2.5 py-2 px-2.5 bg-[#1c1c1d] rounded-lg border border-[#2a2a2b]">
+                  <div className="w-7 h-7 bg-[#4a90e2] rounded-full flex items-center justify-center flex-shrink-0">
                     <svg
-                      className="w-4 h-4 text-white"
+                      className="w-3.5 h-3.5 text-white"
                       fill="currentColor"
                       viewBox="0 0 20 20"
                     >
@@ -157,7 +157,7 @@ const PricingModal: React.FC = () => {
                     </svg>
                   </div>
                   <div>
-                    <p className="text-white font-medium text-sm">
+                    <p className="text-white font-medium text-sm leading-tight">
                       100 messages / billing cycle
                     </p>
                     <p className="text-[#8C8C8C] text-xs">
@@ -166,10 +166,10 @@ const PricingModal: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4 p-3 bg-[#1c1c1d] rounded-lg border border-[#2a2a2b]">
-                  <div className="w-8 h-8 bg-[#4a90e2] rounded-full flex items-center justify-center flex-shrink-0">
+                <div className="flex items-center gap-2.5 py-2 px-2.5 bg-[#1c1c1d] rounded-lg border border-[#2a2a2b]">
+                  <div className="w-7 h-7 bg-[#4a90e2] rounded-full flex items-center justify-center flex-shrink-0">
                     <svg
-                      className="w-4 h-4 text-white"
+                      className="w-3.5 h-3.5 text-white"
                       fill="currentColor"
                       viewBox="0 0 20 20"
                     >
@@ -190,10 +190,10 @@ const PricingModal: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4 p-3 bg-[#1c1c1d] rounded-lg border border-[#2a2a2b]">
-                  <div className="w-8 h-8 bg-[#4a90e2] rounded-full flex items-center justify-center flex-shrink-0">
+                <div className="flex items-center gap-2.5 py-2 px-2.5 bg-[#1c1c1d] rounded-lg border border-[#2a2a2b]">
+                  <div className="w-7 h-7 bg-[#4a90e2] rounded-full flex items-center justify-center flex-shrink-0">
                     <svg
-                      className="w-4 h-4 text-white"
+                      className="w-3.5 h-3.5 text-white"
                       fill="currentColor"
                       viewBox="0 0 20 20"
                     >
@@ -214,10 +214,10 @@ const PricingModal: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4 p-3 bg-[#1c1c1d] rounded-lg border border-[#2a2a2b]">
-                  <div className="w-8 h-8 bg-[#4a90e2] rounded-full flex items-center justify-center flex-shrink-0">
+                <div className="flex items-center gap-2.5 py-2 px-2.5 bg-[#1c1c1d] rounded-lg border border-[#2a2a2b]">
+                  <div className="w-7 h-7 bg-[#4a90e2] rounded-full flex items-center justify-center flex-shrink-0">
                     <svg
-                      className="w-4 h-4 text-white"
+                      className="w-3.5 h-3.5 text-white"
                       fill="currentColor"
                       viewBox="0 0 20 20"
                     >
@@ -245,21 +245,21 @@ const PricingModal: React.FC = () => {
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mb-4 p-3 bg-red-900/20 border border-red-500/30 rounded-lg"
+                className="mb-3 p-2 bg-red-900/20 border border-red-500/30 rounded-lg"
               >
-                <p className="text-red-400 text-sm text-center">{error}</p>
+                <p className="text-red-400 text-xs text-center">{error}</p>
               </motion.div>
             )}
 
             {/* Action Buttons */}
-            <div className="space-y-3">
+            <div className="space-y-2">
               <motion.button
                 onClick={handleUpgrade}
                 whileHover={{ scale: isLoading ? 1 : 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 transition={{ duration: 0.2 }}
                 disabled={isLoading}
-                className={`w-full font-medium py-2 rounded-xl transition-all duration-300 text-xs font-sans flex justify-center items-center gap-3 ${
+                className={`w-full font-medium py-2.5 rounded-xl transition-all duration-300 text-xs font-sans flex justify-center items-center gap-2 ${
                   isLoading
                     ? "bg-gray-600 text-gray-400 cursor-not-allowed"
                     : "bg-gradient-to-r from-[#4a90e2] to-[#5ba0f2] text-white hover:from-[#5ba0f2] hover:to-[#6bb3f7] shadow-lg hover:shadow-xl"
@@ -268,7 +268,7 @@ const PricingModal: React.FC = () => {
                 {isLoading ? (
                   <>
                     <svg
-                      className="animate-spin h-5 w-5"
+                      className="animate-spin h-4 w-4"
                       xmlns="http://www.w3.org/2000/svg"
                       fill="none"
                       viewBox="0 0 24 24"
@@ -292,7 +292,7 @@ const PricingModal: React.FC = () => {
                 ) : (
                   <>
                     <svg
-                      className="w-5 h-5"
+                      className="w-4 h-4"
                       fill="currentColor"
                       viewBox="0 0 20 20"
                     >
@@ -306,22 +306,14 @@ const PricingModal: React.FC = () => {
                   </>
                 )}
               </motion.button>
+              <button
+                type="button"
+                onClick={() => dispatch(setPricingModalOpen(false))}
+                className="w-full text-[#8C8C8C] hover:text-white py-1.5 text-xs font-sans transition-colors duration-200"
+              >
+                Maybe later
+              </button>
             </div>
-          </motion.div>
-
-          {/* Maybe Later Button - Outside Modal */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.1 }}
-            className="fixed top-full left-1/2 transform -translate-x-1/2 mt-4 z-50"
-          >
-            <button
-              onClick={() => dispatch(setPricingModalOpen(false))}
-              className="text-[#8C8C8C] hover:text-white py-2 text-sm font-sans transition-colors duration-200 bg-[#1c1c1d] px-6 rounded-lg border border-[#2a2a2b] backdrop-blur-sm"
-            >
-              Maybe later
-            </button>
           </motion.div>
         </>
       )}

@@ -34,6 +34,8 @@ declare global {
       },
     ) => Promise<{ success: boolean; output: string }>;
     terminalInterrupt: () => Promise<boolean>;
+    /** Teardown and re-spawn bash for terminal-1 (e.g. after `exit` closed the shell). */
+    respawnPrimaryTerminalShell?: () => Promise<void>;
     terminalReady: boolean;
     terminalIsBusy: boolean;
   }
@@ -188,6 +190,38 @@ const Terminal = () => {
     })();
 
   }, []);
+
+  const respawnPrimaryShell = useCallback(async () => {
+    const id = "terminal-1";
+    const term = xtermRef.current[id];
+    if (term) {
+      try {
+        term.dispose();
+      } catch {
+        /* */
+      }
+      delete xtermRef.current[id];
+    }
+    try {
+      writerRef.current[id]?.releaseLock();
+    } catch {
+      /* */
+    }
+    delete writerRef.current[id];
+    try {
+      shellRef.current[id]?.kill();
+    } catch {
+      /* */
+    }
+    delete shellRef.current[id];
+    delete fitRef.current[id];
+    observerRef.current[id]?.disconnect();
+    delete observerRef.current[id];
+    initedRef.current.delete(id);
+    outputBuf.current[id] = "";
+    outputCbs.current[id] = [];
+    await initTab(id);
+  }, [initTab]);
 
   /* ------------------------------------------------------------ */
   /*  Init first terminal once container is ready                  */
@@ -411,9 +445,19 @@ const Terminal = () => {
       return false;
     };
 
+    window.respawnPrimaryTerminalShell =
+      bootState === "ready" ? () => respawnPrimaryShell() : undefined;
+
     window.terminalReady = bootState === "ready";
     window.terminalIsBusy = false;
-  }, [bootState, addTerminal, execInTerminal, terminals, activeTerminal]);
+  }, [
+    bootState,
+    addTerminal,
+    execInTerminal,
+    terminals,
+    activeTerminal,
+    respawnPrimaryShell,
+  ]);
 
   /* ------------------------------------------------------------ */
   /*  Global resize handler + cleanup                              */

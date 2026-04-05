@@ -38,6 +38,8 @@ const WebRuntimeManager = () => {
   const lastQueuedSyncSignatureRef = useRef("");
   const lastCompletedSyncSignatureRef = useRef("");
   const lastStartedPackageJsonRef = useRef<string | null>(null);
+  /** After a streaming turn wrote package.json, run `exit` + fresh shell before npm (stream-only signal). */
+  const leadWithShellExitNextBootRef = useRef(false);
   const startSequenceRef = useRef<Promise<void> | null>(null);
   const syncSequenceRef = useRef<Promise<void>>(Promise.resolve());
   const activeProjectRef = useRef<string | null>(null);
@@ -76,6 +78,7 @@ const WebRuntimeManager = () => {
     lastQueuedSyncSignatureRef.current = "";
     lastCompletedSyncSignatureRef.current = "";
     syncSequenceRef.current = Promise.resolve();
+    leadWithShellExitNextBootRef.current = false;
 
     const interrupt = window.terminalInterrupt;
     if (typeof interrupt === "function") {
@@ -123,7 +126,33 @@ const WebRuntimeManager = () => {
         runtimeSourceRef.current = source;
         lastStartedPackageJsonRef.current = packageJson;
 
-        if (restart) {
+        const leadWithShellExit = leadWithShellExitNextBootRef.current;
+        leadWithShellExitNextBootRef.current = false;
+
+        if (leadWithShellExit) {
+          try {
+            await writeToPrimaryTerminal("exit\n");
+          } catch {
+            /* non-fatal */
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 450));
+          if (typeof window.respawnPrimaryTerminalShell === "function") {
+            try {
+              await window.respawnPrimaryTerminalShell();
+            } catch {
+              /* fall through; writeToPrimaryTerminal may still fail below */
+            }
+          }
+          const shellReady = await window.waitForTerminalReady?.(
+            "terminal-1",
+            15000,
+          );
+          if (!shellReady) {
+            throw new Error("Primary shell did not come back after exit.");
+          }
+        }
+
+        if (restart && !leadWithShellExit) {
           await writeToPrimaryTerminal("\u0003");
           await new Promise((resolve) => window.setTimeout(resolve, 250));
         }
@@ -189,16 +218,30 @@ const WebRuntimeManager = () => {
   useEffect(() => {
     if (previewRuntime !== "web") return;
 
-    const requestRetry = () => {
+    const onPrimaryReady = () => {
       setRuntimeRetryNonce((value) => value + 1);
     };
 
-    window.addEventListener("SB_PRIMARY_TERMINAL_READY", requestRetry);
-    window.addEventListener("SB_WEB_RUNTIME_RETRY", requestRetry);
+    const onWebRuntimeRetry = (event: Event) => {
+      const detail = (event as CustomEvent<{ exitBeforeNpm?: boolean }>).detail;
+      if (detail?.exitBeforeNpm) {
+        leadWithShellExitNextBootRef.current = true;
+      }
+      setRuntimeRetryNonce((value) => value + 1);
+    };
+
+    window.addEventListener("SB_PRIMARY_TERMINAL_READY", onPrimaryReady);
+    window.addEventListener(
+      "SB_WEB_RUNTIME_RETRY",
+      onWebRuntimeRetry as EventListener,
+    );
 
     return () => {
-      window.removeEventListener("SB_PRIMARY_TERMINAL_READY", requestRetry);
-      window.removeEventListener("SB_WEB_RUNTIME_RETRY", requestRetry);
+      window.removeEventListener("SB_PRIMARY_TERMINAL_READY", onPrimaryReady);
+      window.removeEventListener(
+        "SB_WEB_RUNTIME_RETRY",
+        onWebRuntimeRetry as EventListener,
+      );
     };
   }, [previewRuntime]);
 
@@ -223,6 +266,9 @@ const WebRuntimeManager = () => {
     if (previewRuntime !== "web") return;
 
     if (!projectFileSignature) return;
+    if (isStreamActive) {
+      return;
+    }
     if (lastQueuedSyncSignatureRef.current === projectFileSignature) return;
 
     lastQueuedSyncSignatureRef.current = projectFileSignature;
@@ -240,7 +286,12 @@ const WebRuntimeManager = () => {
         lastQueuedSyncSignatureRef.current = "";
       }
     });
-  }, [normalizedProjectFiles, previewRuntime, projectFileSignature]);
+  }, [
+    normalizedProjectFiles,
+    previewRuntime,
+    projectFileSignature,
+    isStreamActive,
+  ]);
 
   useEffect(() => {
     if (previewRuntime !== "web") return;

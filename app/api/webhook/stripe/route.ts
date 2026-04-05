@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       forwardHeaders["x-internal-webhook-token"] = internalWebhookToken;
     }
 
-    await fetch(`${API}/webhook-sub`, {
+    await fetch(`${API}/v0/se/webhook`, {
       method: "POST",
       headers: forwardHeaders,
       body: JSON.stringify(event),

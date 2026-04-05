@@ -42,20 +42,14 @@ const todosSlice = createSlice({
     ) => {
       state.todos = action.payload.todos;
       state.total = action.payload.total ?? action.payload.todos.length;
-      state.pending =
-        action.payload.pending ??
-        action.payload.todos.filter((t) => t.status === "pending").length;
       state.completed =
         action.payload.completed ??
         action.payload.todos.filter((t) => t.status === "completed").length;
-
-      // Clear all todos if all are completed (total === completed and total > 0)
-      if (state.total > 0 && state.total === state.completed) {
-        state.todos = [];
-        state.total = 0;
-        state.pending = 0;
-        state.completed = 0;
-      }
+      state.pending =
+        action.payload.pending ??
+        action.payload.todos.filter(
+          (t) => t.status === "pending" || t.status === "in_progress",
+        ).length;
     },
     // Update todos from tool result (merge/update existing todos)
     updateTodosFromTool: (
@@ -90,20 +84,15 @@ const todosSlice = createSlice({
         }
       });
 
-      // Recalculate totals
       state.total = state.todos.length;
-      state.pending = state.todos.filter((t) => t.status === "pending").length;
-      state.completed = state.todos.filter(
-        (t) => t.status === "completed"
-      ).length;
-
-      // Clear all todos if all are completed (total === completed and total > 0)
-      if (state.total > 0 && state.total === state.completed) {
-        state.todos = [];
-        state.total = 0;
-        state.pending = 0;
-        state.completed = 0;
-      }
+      state.completed =
+        action.payload.completed ??
+        state.todos.filter((t) => t.status === "completed").length;
+      state.pending =
+        action.payload.pending ??
+        state.todos.filter(
+          (t) => t.status === "pending" || t.status === "in_progress",
+        ).length;
     },
     // Clear all todos
     clearTodos: (state) => {

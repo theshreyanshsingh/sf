@@ -11,17 +11,26 @@ import {
   setTitle,
   setTokenUsage,
   setUrl,
+  setPromptCount,
   setPreviewSnackFiles,
   setPreviewSnackDependencies,
   updatePreviewSnackFiles,
   updatePreviewSnackDependencies,
 } from "../redux/reducers/projectOptions";
+import { setPricingModalOpen } from "../redux/reducers/basicData";
 import {
   addMessage,
   setChatId as setChatIdInChatSlice,
   setStreamChatId,
+  updateMessageAgentRun,
 } from "../redux/reducers/chatSlice";
-import { updateTodosFromTool } from "../redux/reducers/todosSlice";
+import {
+  appendChunkToSsePayload,
+  flushSseCarry,
+  streamPayloadToAssistantParts,
+  type SseCarryState,
+} from "./agentMessageNormalize";
+import { clearTodos, updateTodosFromTool } from "../redux/reducers/todosSlice";
 import {
   setFetchedProjectData,
   updateSpecificFile,
@@ -45,10 +54,13 @@ import {
 } from "@/default/mobile";
 const schedulePostStreamCommands = async (packageJsonPath?: string | null) => {
   if (typeof window !== "undefined") {
+    const path = packageJsonPath?.trim() || null;
     window.dispatchEvent(
       new CustomEvent("SB_WEB_RUNTIME_RETRY", {
         detail: {
-          packageJsonPath: packageJsonPath || null,
+          packageJsonPath: path,
+          /** Stream-only: WebRuntimeManager runs `exit` + fresh shell before npm when true. */
+          exitBeforeNpm: Boolean(path),
         },
       }),
     );
@@ -85,6 +97,9 @@ export const useCreateResponse = () => {
   const previewSnackDependenciesRef = useRef(previewSnackDependencies);
   const previewRuntimeRef = useRef(previewRuntime);
   const explicitRuntimeRef = useRef<"web" | "mobile" | null>(null);
+  const sseCarryRef = useRef<SseCarryState>({ carry: "" });
+  const streamStartedAtMsRef = useRef<number | null>(null);
+  const lastStreamAssistantMessageIdRef = useRef<string | null>(null);
 
   const shouldDebugWebContainerWrites = () => {
     if (typeof window === "undefined") return false;
@@ -173,6 +188,72 @@ export const useCreateResponse = () => {
     return keys.length === 0 || !hasPackageJson;
   };
 
+  const finalizeStreamAgentRun = () => {
+    const id = lastStreamAssistantMessageIdRef.current;
+    const startMs = streamStartedAtMsRef.current;
+    if (!id || startMs == null) {
+      lastStreamAssistantMessageIdRef.current = null;
+      streamStartedAtMsRef.current = null;
+      return;
+    }
+    const ended = Date.now();
+    dispatch(
+      updateMessageAgentRun({
+        id,
+        agentRun: {
+          startedAt: new Date(startMs).toISOString(),
+          endedAt: new Date(ended).toISOString(),
+          durationMs: Math.max(0, ended - startMs),
+        },
+      }),
+    );
+    lastStreamAssistantMessageIdRef.current = null;
+    streamStartedAtMsRef.current = null;
+  };
+
+  const PROMPT_QUOTA_DEFAULT_MESSAGE =
+    "You've used all prompts for your current plan. Upgrade to continue with the agent.";
+
+  /** Returns true if handled (caller should return early). */
+  const applyPromptQuotaExhausted = (
+    body: Record<string, unknown>,
+    opts: { chatId?: string | null },
+  ): boolean => {
+    const upgradeNeeded = body.upgradeNeeded === true;
+    const errorCode =
+      typeof body.errorCode === "string" ? body.errorCode : "";
+    if (!upgradeNeeded && errorCode !== "PROMPT_QUOTA_EXHAUSTED") {
+      return false;
+    }
+
+    const text =
+      typeof body.message === "string" && body.message.trim().length > 0
+        ? body.message.trim()
+        : PROMPT_QUOTA_DEFAULT_MESSAGE;
+    const nextCount =
+      typeof body.promptCount === "number" && Number.isFinite(body.promptCount)
+        ? body.promptCount
+        : 0;
+
+    finalizeStreamAgentRun();
+    dispatch(setPromptCount(nextCount));
+    dispatch(clearTodos());
+    dispatch(setStreamActive(false));
+    dispatch(setStreamChatId(null));
+
+    dispatch(
+      addMessage({
+        id: `msg-quota-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        role: "assistant",
+        content: text,
+        createdAt: new Date().toISOString(),
+        chatId: opts.chatId ?? undefined,
+      }),
+    );
+    dispatch(setPricingModalOpen(true));
+    return true;
+  };
+
   const persistChatId = (nextChatId?: string | null, projectId?: string) => {
     if (!nextChatId) return;
     dispatch(setChatIdInChatSlice(nextChatId));
@@ -187,9 +268,8 @@ export const useCreateResponse = () => {
   const maybeRunWebCommandsAfterStream = async (
     packageJsonPath: string | null,
   ) => {
-    void packageJsonPath;
     if (previewRuntimeRef.current === "mobile") return;
-    await schedulePostStreamCommands();
+    await schedulePostStreamCommands(packageJsonPath);
   };
 
   const resolveCodeUrlFromPayload = (payload: unknown): string | null => {
@@ -534,8 +614,23 @@ export const useCreateResponse = () => {
         body: rawString,
       });
 
-      if (!res.ok)
+      if (!res.ok) {
+        if (res.status === 403) {
+          let body: Record<string, unknown> = {};
+          try {
+            body = (await res.json()) as Record<string, unknown>;
+          } catch {
+            /* ignore */
+          }
+          if (applyPromptQuotaExhausted(body, { chatId: effectiveChatId })) {
+            return;
+          }
+          throw new Error(
+            `API Error: 403 ${Object.keys(body).length ? JSON.stringify(body) : "Forbidden"}`,
+          );
+        }
         throw new Error(`API Error: ${res.status} ${await res.text()}`);
+      }
       if (!res.body) throw new Error("Response body is null");
 
       const responseChatIdHeader = res.headers.get("x-chat-id");
@@ -549,6 +644,9 @@ export const useCreateResponse = () => {
       if (res.headers.get("content-type")?.includes("application/json")) {
         const data = await res.json();
         if (data.success) {
+          if (typeof data.promptCount === "number") {
+            dispatch(setPromptCount(data.promptCount));
+          }
           const resolvedRuntimeHint =
             resolvePreviewRuntimeFromRecord(data as Record<string, unknown>);
 
@@ -702,52 +800,52 @@ export const useCreateResponse = () => {
       //stream needed
       else {
         console.warn("Stream start");
+        {
+          const prevPc = store.getState().projectOptions.promptCount;
+          if (typeof prevPc === "number" && prevPc > 0) {
+            dispatch(setPromptCount(prevPc - 1));
+          }
+        }
+        sseCarryRef.current = { carry: "" };
+        streamStartedAtMsRef.current = Date.now();
+        lastStreamAssistantMessageIdRef.current = null;
+        dispatch(clearTodos());
         dispatch(setStreamActive(true));
         dispatch(setStreamChatId(effectiveChatId || null)); // Set stream chat ID
         warnWc("stream needed-");
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
-        let buffer = ""; // Buffer to accumulate stream chunks
-        const processedMessages = new Set<string>(); // Track processed messages to prevent duplicates
+        let markerBuffer = "";
         let updatedPackageJsonPath: string | null = null;
         let receivedWrites = false;
         let lastStreamCodeUrl: string | null = null;
 
-        // Function to extract content between ___start___ and ___end___ markers
         const extractContent = (text: string): string | null => {
           const startMarker = "___start___";
           const endMarker = "___end___";
-
           const startIndex = text.indexOf(startMarker);
           const endIndex = text.indexOf(endMarker);
-
           if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-            const content = text.substring(
-              startIndex + startMarker.length,
-              endIndex,
-            );
-            return content.trim();
+            return text
+              .substring(startIndex + startMarker.length, endIndex)
+              .trim();
           }
-
           return null;
         };
 
-        // Function to process extracted content and add to messages
-        const processExtractedContent = async (content: string) => {
-          // Check if we've already processed this exact content
-          if (processedMessages.has(content)) {
-            return; // Skip duplicate
-          }
-
+        const processExtractedContent = async (jsonStr: string) => {
           try {
-            const parsed = JSON.parse(content);
-            const userMessage = parsed.u_msg || parsed.content || "";
+            const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
 
             if (
               parsed.tokenUsage &&
-              typeof parsed.tokenUsage.totalTokens === "number"
+              typeof (parsed.tokenUsage as { totalTokens?: number }).totalTokens ===
+                "number"
             ) {
-              const delta = Math.max(0, parsed.tokenUsage.totalTokens);
+              const delta = Math.max(
+                0,
+                (parsed.tokenUsage as { totalTokens: number }).totalTokens,
+              );
               if (delta > 0) {
                 const state = store.getState();
                 const current = state.projectOptions;
@@ -763,7 +861,6 @@ export const useCreateResponse = () => {
                   typeof current.tokensRemaining === "number"
                     ? current.tokensRemaining
                     : currentLimit;
-
                 dispatch(
                   setTokenUsage({
                     tokenLimit: currentLimit,
@@ -777,16 +874,10 @@ export const useCreateResponse = () => {
               }
             }
 
-            // Extract tool result if present
-            const toolResult = parsed.UsedTool
-              ? {
-                  UsedTool: parsed.UsedTool,
-                  result: parsed.result,
-                  fileWrite: parsed.fileWrite, // Include fileWrite for todo_write
-                }
-              : undefined;
+            const parts = streamPayloadToAssistantParts(parsed);
+            if (parts.skipMessage) return;
 
-            // Update todos if todo_write tool was used
+            const toolResult = parts.toolResult;
             if (
               toolResult?.UsedTool === "todo_write" &&
               toolResult.result?.metadata?.todos
@@ -803,27 +894,6 @@ export const useCreateResponse = () => {
                 }),
               );
             }
-
-            // Handle todo_write tool - store file in projectFiles
-            // if (
-            //   toolResult?.UsedTool === "todo_write" &&
-            //   (toolResult as any).fileWrite
-            // ) {
-            //   const fileWrite = (toolResult as any).fileWrite;
-            //   if (fileWrite.path && fileWrite.content) {
-            //     dispatch(
-            //       updateSpecificFile({
-            //         filePath: fileWrite.path,
-            //         content: fileWrite.content,
-            //         createDirectories: true,
-            //       })
-            //     );
-            //     // Write to WebContainer
-            //     writeFilesToWebContainer({
-            //       [fileWrite.path]: fileWrite.content,
-            //     });
-            //   }
-            // }
 
             const toolContext = toolResult || parsed;
             const streamCodeUrl =
@@ -865,19 +935,23 @@ export const useCreateResponse = () => {
               }
             }
 
-            if (userMessage || toolResult) {
-              // Mark this content as processed
-              processedMessages.add(content);
-
+            if (parts.userMessage || toolResult) {
+              const id = `msg-${Date.now()}-${Math.random()}`;
+              lastStreamAssistantMessageIdRef.current = id;
               dispatch(
                 addMessage({
-                  id: `msg-${Date.now()}-${Math.random()}`,
+                  id,
                   role: "assistant",
-                  content: userMessage,
+                  content: parts.userMessage,
                   createdAt: new Date().toISOString(),
-                  toolResult: toolResult,
-                  chatId: effectiveChatId, // Pass chatId
-                  codeUrl: parsed.codeUrl || parsed.code_url,
+                  toolResult,
+                  chatId: effectiveChatId,
+                  codeUrl:
+                    typeof parsed.codeUrl === "string"
+                      ? parsed.codeUrl
+                      : typeof parsed.code_url === "string"
+                        ? parsed.code_url
+                        : undefined,
                 }),
               );
             }
@@ -886,51 +960,33 @@ export const useCreateResponse = () => {
           }
         };
 
+        const drainMarkerBuffer = async (buf: string) => {
+          let buffer = buf;
+          let extracted = extractContent(buffer);
+          while (extracted) {
+            await processExtractedContent(extracted);
+            const endMarkerIndex = buffer.indexOf("___end___");
+            if (endMarkerIndex !== -1) {
+              buffer = buffer.substring(endMarkerIndex + "___end___".length);
+            } else {
+              break;
+            }
+            extracted = extractContent(buffer);
+          }
+          return buffer;
+        };
+
         while (true) {
           const { done, value } = await reader.read();
 
           if (!done) {
             const chunk = decoder.decode(value, { stream: true });
-            buffer += chunk;
-            warnWc(buffer);
-
-            // Process buffer: extract and process complete messages
-            // Only process when we have new data
-            let extracted = extractContent(buffer);
-
-            while (extracted) {
-              await processExtractedContent(extracted);
-
-              // Remove processed content from buffer
-              const endMarkerIndex = buffer.indexOf("___end___");
-              if (endMarkerIndex !== -1) {
-                buffer = buffer.substring(endMarkerIndex + "___end___".length);
-              } else {
-                break;
-              }
-
-              // Check for more markers in remaining buffer
-              extracted = extractContent(buffer);
-            }
+            markerBuffer += appendChunkToSsePayload(chunk, sseCarryRef.current);
+            warnWc(markerBuffer);
+            markerBuffer = await drainMarkerBuffer(markerBuffer);
           } else {
-            // Stream ended - process any remaining complete messages in buffer
-            // This handles the case where the last chunk completed a message
-            let extracted = extractContent(buffer);
-
-            while (extracted) {
-              await processExtractedContent(extracted);
-
-              // Remove processed content from buffer
-              const endMarkerIndex = buffer.indexOf("___end___");
-              if (endMarkerIndex !== -1) {
-                buffer = buffer.substring(endMarkerIndex + "___end___".length);
-              } else {
-                break;
-              }
-
-              // Check for more markers in remaining buffer
-              extracted = extractContent(buffer);
-            }
+            markerBuffer += flushSseCarry(sseCarryRef.current);
+            markerBuffer = await drainMarkerBuffer(markerBuffer);
 
             if (previewRuntimeRef.current !== "mobile") {
               if (!receivedWrites) {
@@ -995,6 +1051,7 @@ export const useCreateResponse = () => {
               }
             }
 
+            finalizeStreamAgentRun();
             dispatch(setStreamActive(false));
             dispatch(setStreamChatId(null));
             persistProjectRuntime(projectId, previewRuntimeRef.current);
@@ -1006,6 +1063,7 @@ export const useCreateResponse = () => {
       }
     } catch (error) {
       console.error(" Error in createResponse:", error);
+      finalizeStreamAgentRun();
       dispatch(setStreamActive(false));
       dispatch(setStreamChatId(null));
 
@@ -1186,8 +1244,23 @@ export const useCreateResponse = () => {
         body: rawString,
       });
 
-      if (!res.ok)
+      if (!res.ok) {
+        if (res.status === 403) {
+          let body: Record<string, unknown> = {};
+          try {
+            body = (await res.json()) as Record<string, unknown>;
+          } catch {
+            /* ignore */
+          }
+          if (applyPromptQuotaExhausted(body, { chatId: effectiveChatId })) {
+            return;
+          }
+          throw new Error(
+            `API Error: 403 ${Object.keys(body).length ? JSON.stringify(body) : "Forbidden"}`,
+          );
+        }
         throw new Error(`API Error: ${res.status} ${await res.text()}`);
+      }
       if (!res.body) throw new Error("Response body is null");
 
       const responseChatIdHeader = res.headers.get("x-chat-id");
@@ -1197,57 +1270,85 @@ export const useCreateResponse = () => {
         persistChatId(responseChatId, projectId);
       }
 
+      {
+        const prevPc = store.getState().projectOptions.promptCount;
+        if (typeof prevPc === "number" && prevPc > 0) {
+          dispatch(setPromptCount(prevPc - 1));
+        }
+      }
+
+      sseCarryRef.current = { carry: "" };
+      streamStartedAtMsRef.current = Date.now();
+      lastStreamAssistantMessageIdRef.current = null;
+      dispatch(clearTodos());
       dispatch(setStreamActive(true));
       dispatch(setStreamChatId(effectiveChatId || null)); // Set stream chat ID
       warnWc("stream needed-");
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = ""; // Buffer to accumulate stream chunks
-      const processedMessages = new Set<string>(); // Track processed messages to prevent duplicates
+      let markerBuffer = "";
       let updatedPackageJsonPath: string | null = null;
       let receivedWrites = false;
       let lastStreamCodeUrl: string | null = null;
 
-      // Function to extract content between ___start___ and ___end___ markers
       const extractContent = (text: string): string | null => {
         const startMarker = "___start___";
         const endMarker = "___end___";
-
         const startIndex = text.indexOf(startMarker);
         const endIndex = text.indexOf(endMarker);
-
         if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-          const content = text.substring(
-            startIndex + startMarker.length,
-            endIndex,
-          );
-          return content.trim();
+          return text
+            .substring(startIndex + startMarker.length, endIndex)
+            .trim();
         }
-
         return null;
       };
 
-      // Function to process extracted content and add to messages
-      const processExtractedContent = async (content: string) => {
-        // Check if we've already processed this exact content
-        if (processedMessages.has(content)) {
-          return; // Skip duplicate
-        }
-
+      const processExtractedContent = async (jsonStr: string) => {
         try {
-          const parsed = JSON.parse(content);
-          const userMessage = parsed.u_msg || parsed.content || "";
+          const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
 
-          // Extract tool result if present
-          const toolResult = parsed.UsedTool
-            ? {
-                UsedTool: parsed.UsedTool,
-                result: parsed.result,
-                fileWrite: parsed.fileWrite, // Include fileWrite for todo_write
-              }
-            : undefined;
+          if (
+            parsed.tokenUsage &&
+            typeof (parsed.tokenUsage as { totalTokens?: number }).totalTokens ===
+              "number"
+          ) {
+            const delta = Math.max(
+              0,
+              (parsed.tokenUsage as { totalTokens: number }).totalTokens,
+            );
+            if (delta > 0) {
+              const state = store.getState();
+              const current = state.projectOptions;
+              const currentUsed =
+                typeof current.tokensUsed === "number"
+                  ? current.tokensUsed
+                  : 0;
+              const currentLimit =
+                typeof current.tokenLimit === "number"
+                  ? current.tokenLimit
+                  : 0;
+              const currentRemaining =
+                typeof current.tokensRemaining === "number"
+                  ? current.tokensRemaining
+                  : currentLimit;
+              dispatch(
+                setTokenUsage({
+                  tokenLimit: currentLimit,
+                  tokensUsed: currentUsed + delta,
+                  tokensRemaining:
+                    currentLimit > 0
+                      ? Math.max(0, currentRemaining - delta)
+                      : currentRemaining,
+                }),
+              );
+            }
+          }
 
-          // Update todos if todo_write tool was used
+          const parts = streamPayloadToAssistantParts(parsed);
+          if (parts.skipMessage) return;
+
+          const toolResult = parts.toolResult;
           if (
             toolResult?.UsedTool === "todo_write" &&
             toolResult.result?.metadata?.todos
@@ -1305,19 +1406,23 @@ export const useCreateResponse = () => {
             }
           }
 
-          if (userMessage || toolResult) {
-            // Mark this content as processed
-            processedMessages.add(content);
-
+          if (parts.userMessage || toolResult) {
+            const id = `msg-${Date.now()}-${Math.random()}`;
+            lastStreamAssistantMessageIdRef.current = id;
             dispatch(
               addMessage({
-                id: `msg-${Date.now()}-${Math.random()}`,
+                id,
                 role: "assistant",
-                content: userMessage,
+                content: parts.userMessage,
                 createdAt: new Date().toISOString(),
-                toolResult: toolResult,
-                chatId: effectiveChatId, // Pass chatId
-                codeUrl: parsed.codeUrl || parsed.code_url,
+                toolResult,
+                chatId: effectiveChatId,
+                codeUrl:
+                  typeof parsed.codeUrl === "string"
+                    ? parsed.codeUrl
+                    : typeof parsed.code_url === "string"
+                      ? parsed.code_url
+                      : undefined,
               }),
             );
           }
@@ -1326,51 +1431,33 @@ export const useCreateResponse = () => {
         }
       };
 
+      const drainMarkerBuffer = async (buf: string) => {
+        let buffer = buf;
+        let extracted = extractContent(buffer);
+        while (extracted) {
+          await processExtractedContent(extracted);
+          const endMarkerIndex = buffer.indexOf("___end___");
+          if (endMarkerIndex !== -1) {
+            buffer = buffer.substring(endMarkerIndex + "___end___".length);
+          } else {
+            break;
+          }
+          extracted = extractContent(buffer);
+        }
+        return buffer;
+      };
+
       while (true) {
         const { done, value } = await reader.read();
 
         if (!done) {
           const chunk = decoder.decode(value, { stream: true });
-          buffer += chunk;
-          warnWc(buffer);
-
-          // Process buffer: extract and process complete messages
-          // Only process when we have new data
-          let extracted = extractContent(buffer);
-
-          while (extracted) {
-            await processExtractedContent(extracted);
-
-            // Remove processed content from buffer
-            const endMarkerIndex = buffer.indexOf("___end___");
-            if (endMarkerIndex !== -1) {
-              buffer = buffer.substring(endMarkerIndex + "___end___".length);
-            } else {
-              break;
-            }
-
-            // Check for more markers in remaining buffer
-            extracted = extractContent(buffer);
-          }
+          markerBuffer += appendChunkToSsePayload(chunk, sseCarryRef.current);
+          warnWc(markerBuffer);
+          markerBuffer = await drainMarkerBuffer(markerBuffer);
         } else {
-          // Stream ended - process any remaining complete messages in buffer
-          // This handles the case where the last chunk completed a message
-          let extracted = extractContent(buffer);
-
-          while (extracted) {
-            await processExtractedContent(extracted);
-
-            // Remove processed content from buffer
-            const endMarkerIndex = buffer.indexOf("___end___");
-            if (endMarkerIndex !== -1) {
-              buffer = buffer.substring(endMarkerIndex + "___end___".length);
-            } else {
-              break;
-            }
-
-            // Check for more markers in remaining buffer
-            extracted = extractContent(buffer);
-          }
+          markerBuffer += flushSseCarry(sseCarryRef.current);
+          markerBuffer = await drainMarkerBuffer(markerBuffer);
 
           if (previewRuntimeRef.current !== "mobile") {
             if (!receivedWrites) {
@@ -1435,6 +1522,7 @@ export const useCreateResponse = () => {
             }
           }
 
+          finalizeStreamAgentRun();
           dispatch(setStreamActive(false));
           dispatch(setStreamChatId(null));
           persistProjectRuntime(projectId, previewRuntimeRef.current);
@@ -1443,7 +1531,8 @@ export const useCreateResponse = () => {
         }
       }
     } catch (error) {
-      console.error(" Error in createResponse:", error);
+      console.error(" Error in createSecondaryResponse:", error);
+      finalizeStreamAgentRun();
       dispatch(setStreamActive(false));
       dispatch(setStreamChatId(null));
 

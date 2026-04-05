@@ -1,26 +1,37 @@
 "use client";
 
-import { useRef } from "react";
-import { API } from "../config/publicEnv";
+import { useCallback, useEffect, useState } from "react";
+import { API } from "@/app/config/publicEnv";
 
 type UseSubscriptionCheckProps = {
   isAuthenticated: boolean;
   email: string;
 };
 
+/**
+ * Tracks whether the user is out of prompts (promptCount <= 0) for any plan.
+ * Uses React state so the landing Hero updates after /sub-status resolves.
+ */
 export function useSubscriptionCheck({
   isAuthenticated,
   email,
 }: UseSubscriptionCheckProps) {
-  const needsUpgradeRef = useRef<boolean | null>(null);
+  const [needsUpgrade, setNeedsUpgrade] = useState<boolean | null>(() =>
+    !isAuthenticated ? false : null,
+  );
 
-  const checkSubscriptionStatus = async () => {
-    // Return false if not authenticated
-    if (!isAuthenticated || !email) return false;
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setNeedsUpgrade(false);
+      return;
+    }
+    setNeedsUpgrade(null);
+  }, [isAuthenticated, email]);
 
-    // Return current ref value if already set
-    if (needsUpgradeRef.current !== null) {
-      return needsUpgradeRef.current;
+  const checkSubscriptionStatus = useCallback(async () => {
+    if (!isAuthenticated || !email) {
+      setNeedsUpgrade(false);
+      return false;
     }
 
     try {
@@ -39,22 +50,22 @@ export function useSubscriptionCheck({
       }
 
       const data = await response.json();
-
-      // Check if prompt count is 0 and plan is free
-      const upgradeNeeded = data.promptCount === 0;
-
-      // Store in ref for persistence
-      needsUpgradeRef.current = upgradeNeeded;
-
-      return upgradeNeeded;
+      const promptCount =
+        typeof data.promptCount === "number" ? data.promptCount : null;
+      const blocked = promptCount !== null && promptCount <= 0;
+      setNeedsUpgrade(blocked);
+      return blocked;
     } catch (error) {
       console.error("Error checking subscription status:", error);
+      setNeedsUpgrade(false);
       return false;
     }
-  };
+  }, [isAuthenticated, email]);
 
   return {
-    needsUpgrade: !isAuthenticated ? false : needsUpgradeRef.current,
+    needsUpgrade: !isAuthenticated ? false : needsUpgrade,
+    /** Authenticated but /sub-status not completed yet */
+    needsUpgradePending: Boolean(isAuthenticated && needsUpgrade === null),
     checkSubscriptionStatus,
   };
 }

@@ -7,6 +7,8 @@ export interface ToolResult {
     success?: boolean;
     title?: string;
     output?: string;
+    fileWrite?: { path: string; content: string };
+    fileWrites?: Array<{ path: string; content: string }>;
     metadata?: {
       todos?: Array<{
         id: string;
@@ -22,6 +24,8 @@ export interface ToolResult {
       completed?: number;
     };
   };
+  fileWrite?: { path: string; content: string };
+  fileWrites?: Array<{ path: string; content: string }>;
 }
 
 // Message interface for chat messages
@@ -41,6 +45,12 @@ export interface Message {
   toolResult?: ToolResult; // Tool execution results
   codeUrl?: string; // CloudFront URL for code restoration
   chatId?: string; // ID of the chat this message belongs to
+  /** Filled when an agent stream completes (duration for “Worked for …” UI). */
+  agentRun?: {
+    startedAt?: string;
+    endedAt?: string;
+    durationMs?: number;
+  };
 }
 
 // Chat state interface
@@ -126,16 +136,6 @@ const chatSlice = createSlice({
     addMessage: (state, action: PayloadAction<Message>) => {
       const incomingChatId = action.payload.chatId;
       if (incomingChatId) {
-        const activeChatIds = new Set(
-          [state.chatId, state.messagesChatId, state.streamChatId].filter(
-            (value): value is string => typeof value === "string" && value.length > 0,
-          ),
-        );
-
-        if (activeChatIds.size > 0 && !activeChatIds.has(incomingChatId)) {
-          return;
-        }
-
         if (!state.chatId) {
           state.chatId = incomingChatId;
         }
@@ -155,12 +155,6 @@ const chatSlice = createSlice({
         state.messages = [];
       }
 
-      const activeChatIds = new Set(
-        [state.chatId, state.messagesChatId, state.streamChatId].filter(
-          (value): value is string => typeof value === "string" && value.length > 0,
-        ),
-      );
-
       const firstIncomingChatId =
         action.payload.find((msg) => typeof msg.chatId === "string" && msg.chatId.length > 0)
           ?.chatId || null;
@@ -172,14 +166,7 @@ const chatSlice = createSlice({
         state.messagesChatId = firstIncomingChatId;
       }
 
-      const messagesToAdd = action.payload.filter((msg) => {
-        if (msg.chatId && activeChatIds.size > 0 && !activeChatIds.has(msg.chatId)) {
-          return false;
-        }
-        return true;
-      });
-
-      state.messages.push(...messagesToAdd);
+      state.messages.push(...action.payload);
     },
     // Clear all messages
     clearMessages: (state) => {
@@ -194,6 +181,16 @@ const chatSlice = createSlice({
       state.messages = action.payload.messages;
       state.chatId = action.payload.chatId;
       state.messagesChatId = action.payload.chatId;
+    },
+    updateMessageAgentRun: (
+      state,
+      action: PayloadAction<{ id: string; agentRun: Message["agentRun"] }>,
+    ) => {
+      if (!state.messages) return;
+      const m = state.messages.find((x) => x.id === action.payload.id);
+      if (m) {
+        m.agentRun = { ...m.agentRun, ...action.payload.agentRun };
+      }
     },
     // Set suggested prompt for input injection
     setSuggestedPrompt: (state, action: PayloadAction<string | null>) => {
@@ -217,6 +214,7 @@ export const {
   addMessages,
   clearMessages,
   setMessages,
+  updateMessageAgentRun,
   setSuggestedPrompt,
   resetChatState,
 } = chatSlice.actions;
