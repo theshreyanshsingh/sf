@@ -21,7 +21,6 @@ import { RootState } from "@/app/redux/store";
 import { FileEntry, UIFileEntry } from "../types";
 import { setCurrentFile } from "@/app/redux/reducers/projectFiles";
 import { refreshPreview } from "@/app/redux/reducers/projectOptions";
-import { TbFolderPlus, TbFilePlus, TbUpload } from "react-icons/tb";
 // TODO: re-wire after webcontainer rewrite
 const createFileSystemOperations = (dispatch: any, fileTree: any) => ({
   writeFile: async (_path: string, _content: string | Uint8Array) => false,
@@ -1565,35 +1564,7 @@ const CodeEditor = ({
 
           {/* Icon + Input Wrapper - Only show when not collapsed */}
           {!isExplorerCollapsed && (
-            <div className="flex items-center justify-between flex-grow overflow-hidden">
-              {/* File Creation Buttons */}
-              <div className="flex items-center justify-evenly space-x-1 ml-2">
-                <button
-                  className="text-[#949494] hover:text-white p-1 rounded border-r border-[#2a2a2a] transition-colors flex gap-1 justify-center items-center"
-                  title="New File"
-                  onClick={() => handleFileOperation("file")}
-                >
-                  <TbFilePlus size={14} />
-                  File
-                </button>
-                <button
-                  className="text-[#949494] hover:text-white p-1 border-r border-[#2a2a2a] rounded transition-colors flex gap-1 justify-center items-center"
-                  title="New Folder"
-                  onClick={() => handleFileOperation("folder")}
-                >
-                  <TbFolderPlus size={14} />
-                  Folder
-                </button>
-                <button
-                  className="text-[#949494] hover:text-white p-1 rounded transition-colors flex gap-1 justify-center items-center"
-                  title="Upload File"
-                  onClick={handleFileUpload}
-                >
-                  <TbUpload size={14} />
-                  Upload
-                </button>
-              </div>
-            </div>
+            <div className="flex flex-grow items-center justify-between overflow-hidden" />
           )}
         </div>
 

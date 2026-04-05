@@ -49,11 +49,11 @@ const Chat: NextPage = () => {
       </div> */}
 
       {/* Palette / Messages */}
-      <div className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto break-words scrollbar-hide">
+      <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-hidden break-words scrollbar-hide">
         {selected === "ai" ? (
           <div
-            className="h-full break-words"
-            style={{ display: selected === "ai" ? "block" : "none" }}
+            className="flex h-full min-h-0 flex-1 flex-col break-words"
+            style={{ display: selected === "ai" ? "flex" : "none" }}
           >
             <Messages />
           </div>

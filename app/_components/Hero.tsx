@@ -567,7 +567,13 @@ const Hero = () => {
         const isValidType = validImageTypes.includes(newFile.type);
 
         if (!isValidType) {
-          alert("Please upload only images.");
+          dispatch(
+            setNotification({
+              modalOpen: true,
+              status: "error",
+              text: "Only PNG or JPEG images can be attached.",
+            }),
+          );
           return;
         }
 
@@ -1397,7 +1403,7 @@ const Hero = () => {
                   }
                   onClick={handleAttachClick}
                   className="cursor-pointer p-2 rounded-md text-xs font-sans font-medium gap-x-1 flex justify-center items-center transition-colors text-[#b1b1b1] hover:bg-[#2a292c]"
-                  title="Attach image"
+                  title="Attach PNG or JPEG"
                 >
                   <FaPaperclip />
                 </button>
@@ -1510,7 +1516,7 @@ const Hero = () => {
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                accept="image/*"
+                accept=".jpg,.jpeg,.png,image/jpeg,image/png"
                 className="hidden"
               />
 

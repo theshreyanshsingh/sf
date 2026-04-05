@@ -844,8 +844,13 @@ export default SBFormBlock;
     <div className="h-full w-full p-6 overflow-y-auto text-white">
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div>
-          <h2 className="text-lg font-semibold">Pages Manager</h2>
-          <p className="text-xs text-[#a0a0a8]">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-lg font-semibold">Pages</h2>
+            <span className="text-[10px] font-medium uppercase tracking-wide px-2 py-0.5 rounded-full border border-[#2a2a2b] text-[#a0a0a8]">
+              Beta
+            </span>
+          </div>
+          <p className="text-xs text-[#a0a0a8] mt-1">
             Manage pages, orphaned links, and insert new sections like forms.
           </p>
         </div>

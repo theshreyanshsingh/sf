@@ -1,6 +1,6 @@
 "use client";
 import { NextPage } from "next";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Switcher from "./_sub-components/Switcher";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/app/redux/store";
@@ -13,6 +13,8 @@ import { API } from "@/app/config/publicEnv";
 import { setNotification } from "@/app/redux/reducers/NotificationModalReducer";
 import { LuLoaderCircle } from "react-icons/lu";
 import { STARTING_POINTS } from "@/app/config/startingPoints";
+
+type PublishPhase = "idle" | "queued" | "building" | "failed";
 
 const Header: NextPage = () => {
   const { title, startingPoint, isStreamActive, previewRuntime } = useSelector(
@@ -36,6 +38,94 @@ const Header: NextPage = () => {
   const router = useRouter();
   const dispatch = useDispatch();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  const [publishSubmitting, setPublishSubmitting] = useState(false);
+  const [publishPhase, setPublishPhase] = useState<PublishPhase>("idle");
+
+  const fetchPublishStatus = useCallback(async () => {
+    const projectId = getProjectId();
+    const em = email.value;
+    if (!projectId || typeof em !== "string" || !em) return null;
+    const response = await fetch(`${API}/publish-status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: em, projectId }),
+    });
+    let data: Record<string, unknown> | null = null;
+    try {
+      data = (await response.json()) as Record<string, unknown>;
+    } catch {
+      return {
+        success: false,
+        message: "Invalid response from server",
+      };
+    }
+    if (!response.ok) {
+      return {
+        success: false,
+        message:
+          typeof data?.message === "string"
+            ? data.message
+            : `Error ${response.status}`,
+      };
+    }
+    return data;
+  }, [getProjectId, email.value]);
+
+  /** Hydrate from DB + Bull on load/navigation; keep polling while publish is in flight (survives refresh). */
+  useEffect(() => {
+    if (previewRuntime === "mobile") return;
+    const projectId = getProjectId();
+    const em = email.value;
+    if (!projectId || typeof em !== "string" || !em) return;
+
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const applyStatusPayload = (data: Record<string, unknown>) => {
+      if (!data.success) {
+        setPublishPhase("idle");
+        return;
+      }
+      let phase = data.phase as PublishPhase;
+      if (phase === "failed") phase = "idle";
+      setPublishPhase(phase);
+    };
+
+    const tick = async () => {
+      try {
+        const data = await fetchPublishStatus();
+        if (cancelled || data == null) return;
+        applyStatusPayload(data);
+      } catch {
+        if (!cancelled) {
+          setPublishPhase("idle");
+        }
+      }
+    };
+
+    void tick();
+
+    const inFlight =
+      publishSubmitting ||
+      publishPhase === "queued" ||
+      publishPhase === "building";
+    if (inFlight) {
+      intervalId = setInterval(tick, 2500);
+    }
+
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [
+    previewRuntime,
+    getProjectId,
+    email.value,
+    fetchPublishStatus,
+    publishPhase,
+    publishSubmitting,
+  ]);
 
   const normalizedFiles = useMemo(() => {
     if (!projectData || typeof projectData !== "object") return {};
@@ -63,63 +153,79 @@ const Header: NextPage = () => {
 
   const hasExplorerFiles = Object.keys(normalizedFiles).length > 0;
   const isMobilePreviewRuntime = previewRuntime === "mobile";
-  const actionsLocked = Boolean(isStreamActive) || !hasExplorerFiles;
-  const disabledReason = isStreamActive
+  const publishBusy =
+    !isMobilePreviewRuntime &&
+    (publishSubmitting ||
+      publishPhase === "queued" ||
+      publishPhase === "building");
+
+  const publishStatusSticky =
+    !isMobilePreviewRuntime && (publishBusy || publishSubmitting);
+
+  const publishStatusLabel = useMemo(() => {
+    if (publishSubmitting) return "Queuing…";
+    if (publishPhase === "building") return "Deploying…";
+    if (publishPhase === "queued") return "Queued…";
+    return "";
+  }, [publishSubmitting, publishPhase]);
+  /** Publish / download only — profile and settings stay available while streaming. */
+  const publishLocked = Boolean(isStreamActive) || !hasExplorerFiles;
+  const publishDisabledReason = isStreamActive
     ? "Please wait for generation to finish before taking this action."
     : "No files found in explorer yet.";
 
-  const notifyActionsLocked = useCallback(() => {
-    if (!actionsLocked) return;
+  const notifyPublishLocked = useCallback(() => {
+    if (!publishLocked) return;
     dispatch(
       setNotification({
         modalOpen: true,
         status: "info",
-        text: disabledReason,
+        text: publishDisabledReason,
       })
     );
-  }, [actionsLocked, disabledReason, dispatch]);
+  }, [publishLocked, publishDisabledReason, dispatch]);
 
   const handlePublish = async () => {
-    if (actionsLocked || actionLoading) {
-      notifyActionsLocked();
+    if (publishLocked) {
+      notifyPublishLocked();
       return;
     }
+    if (publishBusy) return;
 
-    setActionLoading(true);
+    setPublishSubmitting(true);
+    setPublishPhase("queued");
+
     const projectId = getProjectId();
 
-    const response = await fetch(`${API}/build-code`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email: email.value, projectId }),
-    });
-    const data = await response.json();
+    try {
+      const response = await fetch(`${API}/build-code`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: email.value, projectId }),
+      });
+      let data: { success?: boolean; message?: string } = {};
+      try {
+        data = await response.json();
+      } catch {
+        setPublishPhase("idle");
+        return;
+      }
 
-    if (data.success) {
-      dispatch(
-        setNotification({
-          modalOpen: true,
-          status: "success",
-          text: "Publish started. You will receive an email soon.",
-        })
-      );
-    } else {
-      dispatch(
-        setNotification({
-          modalOpen: true,
-          status: "error",
-          text: data.message,
-        })
-      );
+      if (!response.ok || !data.success) {
+        setPublishPhase("idle");
+      }
+    } catch {
+      setPublishPhase("idle");
+    } finally {
+      setPublishSubmitting(false);
     }
-    setActionLoading(false);
   };
 
   const handleDownloadCode = useCallback(() => {
-    if (actionsLocked || actionLoading) {
-      notifyActionsLocked();
+    if (publishLocked || actionLoading) {
+      notifyPublishLocked();
       return;
     }
 
@@ -164,12 +270,12 @@ const Header: NextPage = () => {
 
     void createAndDownloadZip();
   }, [
-    actionsLocked,
+    publishLocked,
     actionLoading,
     dispatch,
     getProjectId,
     normalizedFiles,
-    notifyActionsLocked,
+    notifyPublishLocked,
   ]);
 
   const handlePrimaryAction = () => {
@@ -216,7 +322,7 @@ const Header: NextPage = () => {
       <div className="pointer-events-none absolute inset-y-0 left-1/2 hidden -translate-x-1/2 items-center md:flex">
         <div
           className={`pointer-events-auto px-2 ${
-            actionsLocked ? "pointer-events-none opacity-50" : ""
+            publishLocked ? "pointer-events-none opacity-50" : ""
           }`}
         >
           <Switcher />
@@ -225,48 +331,69 @@ const Header: NextPage = () => {
       {/* Action Buttons */}
       <div className="hidden shrink-0 items-center space-x-4 md:flex">
         {/* Primary Action */}
-        <div className="relative group flex items-center w-fit gap-x-3">
-          <button
-            onClick={handlePrimaryAction}
-            disabled={actionLoading || actionsLocked}
-            className={`space-x-2 px-3 py-[2px] rounded-md justify-center items-center flex text-white ${
-              actionLoading || actionsLocked
-                ? "opacity-50 cursor-not-allowed"
-                : "hover:text-black hover:bg-gray-200"
-            }`}
-            title={actionsLocked ? disabledReason : undefined}
-          >
-            {actionLoading ? (
-              <LuLoaderCircle className="animate-spin" />
-            ) : isMobilePreviewRuntime ? (
-              <TbDownload className={"text-lg"} />
-            ) : (
-              <TbRocket className={"text-lg"} />
-            )}
-            <span className="text-xs hidden sm:inline">
-              {actionLoading
-                ? isMobilePreviewRuntime
+        <div className="relative group flex min-w-0 max-w-[min(100%,520px)] items-center gap-x-2 md:gap-x-3">
+          {(isMobilePreviewRuntime || !publishBusy) && (
+            <button
+              onClick={handlePrimaryAction}
+              disabled={
+                publishLocked ||
+                publishBusy ||
+                (isMobilePreviewRuntime && actionLoading)
+              }
+              className={`space-x-2 px-3 py-[2px] rounded-md justify-center items-center flex text-white ${
+                publishLocked ||
+                publishBusy ||
+                (isMobilePreviewRuntime && actionLoading)
+                  ? "opacity-50 cursor-not-allowed"
+                  : "hover:text-black hover:bg-gray-200"
+              }`}
+              title={publishLocked ? publishDisabledReason : undefined}
+            >
+              {isMobilePreviewRuntime && actionLoading ? (
+                <LuLoaderCircle className="animate-spin" />
+              ) : isMobilePreviewRuntime ? (
+                <TbDownload className={"text-lg"} />
+              ) : (
+                <TbRocket className={"text-lg"} />
+              )}
+              <span className="text-xs hidden sm:inline">
+                {isMobilePreviewRuntime && actionLoading
                   ? "Downloading..."
-                  : "Publishing..."
-                : isMobilePreviewRuntime
-                  ? "Download Code"
-                  : "Publish"}
-            </span>
-          </button>
+                  : isMobilePreviewRuntime
+                    ? "Download Code"
+                    : "Publish"}
+              </span>
+            </button>
+          )}
+
+          {publishStatusSticky && publishStatusLabel ? (
+            <div
+              className="flex min-w-0 max-w-[240px] flex-col text-zinc-400"
+              title={publishStatusLabel}
+              role="status"
+              aria-live="polite"
+            >
+              <div className="flex items-center gap-1.5">
+                {(publishBusy || publishSubmitting) && (
+                  <LuLoaderCircle
+                    className="shrink-0 animate-spin opacity-80"
+                    size={14}
+                    aria-hidden
+                  />
+                )}
+                <span className="truncate text-[11px] leading-tight">
+                  {publishStatusLabel}
+                </span>
+              </div>
+            </div>
+          ) : null}
 
           <button
             onClick={() => {
-              if (actionsLocked) {
-                notifyActionsLocked();
-                return;
-              }
               router.push("/settings");
             }}
-            disabled={actionsLocked}
-            className={`bg-white text-black text-xs font-medium px-2 p-1 rounded-md ${
-              actionsLocked ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
-            }`}
-            title={actionsLocked ? disabledReason : undefined}
+            className="cursor-pointer bg-white text-black text-xs font-medium px-2 p-1 rounded-md"
+            title="Account & settings"
           >
             {email.value !== null &&
             email.value !== undefined &&
@@ -278,8 +405,25 @@ const Header: NextPage = () => {
       </div>
 
       {/* Mobile Action buttons */}
-      <div className="flex shrink-0 items-center space-x-2 md:hidden">
-        <div className={actionsLocked ? "pointer-events-none opacity-50" : ""}>
+      <div className="flex min-w-0 shrink-0 items-center space-x-2 md:hidden">
+        {publishStatusSticky && publishStatusLabel ? (
+          <div
+            className="min-w-0 max-w-[38vw] truncate text-[10px] leading-tight text-zinc-500"
+            title={publishStatusLabel}
+            role="status"
+            aria-live="polite"
+          >
+            {(publishBusy || publishSubmitting) && (
+              <LuLoaderCircle
+                className="mr-0.5 inline-block animate-spin align-middle"
+                size={12}
+                aria-hidden
+              />
+            )}
+            {publishStatusLabel}
+          </div>
+        ) : null}
+        <div className={publishLocked ? "pointer-events-none opacity-50" : ""}>
           <Switcher />
         </div>
         {/* Mobile Chat Trigger */}
@@ -294,17 +438,10 @@ const Header: NextPage = () => {
         {/* Share */}
         <button
           onClick={() => {
-            if (actionsLocked) {
-              notifyActionsLocked();
-              return;
-            }
             setDropdownOpen(!dropdownOpen);
           }}
-          className={`text-sm font-sans font-medium text-white px-3 rounded-lg ${
-            actionsLocked ? "opacity-50 cursor-not-allowed" : "hover:bg-[#252525]"
-          }`}
-          disabled={actionsLocked}
-          title={actionsLocked ? disabledReason : undefined}
+          className="cursor-pointer text-sm font-sans font-medium text-white px-3 rounded-lg hover:bg-[#252525]"
+          type="button"
         >
           <TbChartDots3 className="text-lg" />
         </button>
@@ -313,47 +450,48 @@ const Header: NextPage = () => {
         <div className="md:hidden overflow-hidden absolute right-1 top-9 mt-2 w-30 bg-[#1A1A1A] rounded-md shadow-lg z-40 border border-[#252525]">
           <div
             onClick={() => {
-              if (actionsLocked) {
-                notifyActionsLocked();
-                return;
-              }
               router.push("/settings");
               setDropdownOpen(false);
             }}
-            className={`text-white truncate text-xs font-medium px-4 py-2 rounded-md ${
-              actionsLocked ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-[#252525]"
-            }`}
+            className="cursor-pointer text-white truncate text-xs font-medium px-4 py-2 rounded-md hover:bg-[#252525]"
           >
             {email.value}
           </div>
 
-          <button
-            onClick={() => {
-              if (actionsLocked) {
-                notifyActionsLocked();
-                return;
+          {(isMobilePreviewRuntime || !publishBusy) && (
+            <button
+              onClick={() => {
+                if (publishLocked) {
+                  notifyPublishLocked();
+                  return;
+                }
+                handlePrimaryAction();
+                setDropdownOpen(false);
+              }}
+              disabled={
+                publishLocked ||
+                publishBusy ||
+                (isMobilePreviewRuntime && actionLoading)
               }
-              handlePrimaryAction();
-              setDropdownOpen(false);
-            }}
-            disabled={actionLoading || actionsLocked}
-            className={`block w-full text-left px-4 py-2 text-xs text-white ${
-              actionLoading || actionsLocked
-                ? "opacity-50 cursor-not-allowed"
-                : "hover:bg-[#252525]"
-            }`}
-            title={actionsLocked ? disabledReason : undefined}
-          >
-            {isMobilePreviewRuntime
-              ? actionLoading
-                ? "Downloading..."
-                : "Download Code"
-              : actionLoading
-                ? "Publishing..."
+              className={`block w-full text-left px-4 py-2 text-xs text-white ${
+                publishLocked ||
+                publishBusy ||
+                (isMobilePreviewRuntime && actionLoading)
+                  ? "opacity-50 cursor-not-allowed"
+                  : "hover:bg-[#252525]"
+              }`}
+              title={publishLocked ? publishDisabledReason : undefined}
+            >
+              {isMobilePreviewRuntime
+                ? actionLoading
+                  ? "Downloading..."
+                  : "Download Code"
                 : "Publish"}
-          </button>
+            </button>
+          )}
         </div>
       )}
+
     </div>
   );
 };

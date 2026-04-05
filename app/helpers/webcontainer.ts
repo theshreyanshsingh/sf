@@ -5,6 +5,8 @@ import type {
   WebContainer,
 } from "@webcontainer/api";
 
+import { mergePreviewBridgeScripts } from "./mergePreviewBridgeScripts";
+
 /* ------------------------------------------------------------------ */
 /*  Singleton                                                          */
 /* ------------------------------------------------------------------ */
@@ -194,10 +196,16 @@ export async function fetchAndMountTestFiles(): Promise<Record<string, string> |
     return null;
   }
 
-  console.log("[webcontainer] mounting", Object.keys(files).length, "files:", Object.keys(files).join(", "));
-  await mountFiles(files);
+  const merged = await mergePreviewBridgeScripts(files);
+  console.log(
+    "[webcontainer] mounting",
+    Object.keys(merged).length,
+    "files:",
+    Object.keys(merged).join(", "),
+  );
+  await mountFiles(merged);
   console.log("[webcontainer] mount complete");
-  return files;
+  return merged;
 }
 
 /* ------------------------------------------------------------------ */

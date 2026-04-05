@@ -80,19 +80,25 @@ const SubHeader: NextPage = () => {
           <>
             <button
               onClick={() => {
-                if (isPreviewReady) {
+                if (!previewChromeLocked) {
                   reduxDispatch(setInspectorMode(!inspectorMode));
                 }
               }}
-              disabled={!isPreviewReady}
-              className={`flex items-center cursor-pointer text-xs gap-1 justify-center transition-colors ${
-                !isPreviewReady
-                  ? "text-gray-500 cursor-not-allowed"
+              disabled={previewChromeLocked}
+              className={`flex items-center text-xs gap-1 justify-center transition-colors ${
+                previewChromeLocked
+                  ? "cursor-not-allowed text-gray-500"
                   : inspectorMode
-                    ? "text-[#4a90e2]"
-                    : "text-white hover:text-gray-300"
+                    ? "cursor-pointer text-[#4a90e2]"
+                    : "cursor-pointer text-white hover:text-gray-300"
               }`}
-              title={!isPreviewReady ? "Wait for preview to load" : "Toggle Element Inspector"}
+              title={
+                !isPreviewReady
+                  ? "Wait for preview to load"
+                  : isStreamActive
+                    ? "Inspector is available after streaming finishes"
+                    : "Toggle Element Inspector"
+              }
             >
               <LuMousePointer2 />
               Inspector
@@ -100,19 +106,25 @@ const SubHeader: NextPage = () => {
 
             <button
               onClick={() => {
-                if (isPreviewReady) {
+                if (!previewChromeLocked) {
                   reduxDispatch(setEditMode(!editMode));
                 }
               }}
-              disabled={!isPreviewReady}
-              className={`flex items-center cursor-pointer text-xs gap-1 justify-center transition-colors ${
-                !isPreviewReady
-                  ? "text-gray-500 cursor-not-allowed"
+              disabled={previewChromeLocked}
+              className={`flex items-center text-xs gap-1 justify-center transition-colors ${
+                previewChromeLocked
+                  ? "cursor-not-allowed text-gray-500"
                   : editMode
-                    ? "text-[#4a90e2]"
-                    : "text-white hover:text-gray-300"
+                    ? "cursor-pointer text-[#4a90e2]"
+                    : "cursor-pointer text-white hover:text-gray-300"
               }`}
-              title={!isPreviewReady ? "Wait for preview to load" : "Toggle WYSIWYG Edit Mode"}
+              title={
+                !isPreviewReady
+                  ? "Wait for preview to load"
+                  : isStreamActive
+                    ? "Edit mode is available after streaming finishes"
+                    : "Toggle WYSIWYG Edit Mode"
+              }
             >
               <TiPen />
               Edit
@@ -120,11 +132,24 @@ const SubHeader: NextPage = () => {
 
             {editMode && (
               <button
-                onClick={() => reduxDispatch(setShowTemplateBlocks(!showTemplateBlocks))}
-                className={`flex items-center cursor-pointer text-xs gap-1 justify-center transition-colors ${
-                  showTemplateBlocks ? "text-[#4a90e2]" : "text-white hover:text-gray-300"
+                onClick={() => {
+                  if (!previewChromeLocked) {
+                    reduxDispatch(setShowTemplateBlocks(!showTemplateBlocks));
+                  }
+                }}
+                disabled={previewChromeLocked}
+                className={`flex items-center text-xs gap-1 justify-center transition-colors ${
+                  previewChromeLocked
+                    ? "cursor-not-allowed text-gray-500"
+                    : showTemplateBlocks
+                      ? "cursor-pointer text-[#4a90e2]"
+                      : "cursor-pointer text-white hover:text-gray-300"
                 }`}
-                title="Toggle Template Blocks panel"
+                title={
+                  previewChromeLocked
+                    ? "Available after streaming finishes"
+                    : "Toggle Template Blocks panel"
+                }
               >
                 <LuLayoutTemplate className="text-sm" />
                 Blocks

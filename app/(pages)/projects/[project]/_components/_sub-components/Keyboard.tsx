@@ -12,6 +12,7 @@ import {
 } from "@/app/redux/reducers/basicData";
 import { setNotification } from "@/app/redux/reducers/NotificationModalReducer";
 import {
+  setInspectorMode,
   setPendingAttachment,
   setSelectedBlock,
 } from "@/app/redux/reducers/projectOptions";
@@ -282,6 +283,8 @@ const Keyboard: NextPage = () => {
       const input = inputRaw.trim();
       if (isStreamActive || !input) return;
 
+      dispatch(setInspectorMode(false));
+
       try {
         setAttachments([]);
         setMessage("");
@@ -311,6 +314,7 @@ const Keyboard: NextPage = () => {
       }
     },
     [
+      dispatch,
       getProjectId,
       createSecondaryResponse,
       email.value,
@@ -386,14 +390,8 @@ const Keyboard: NextPage = () => {
 
       const newFile = files[0];
 
-      // Validate file type
-      const validImageTypes = [
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-        "image/gif",
-        "image/svg+xml",
-      ];
+      // PNG and JPEG only (no SVG, WebP, GIF, etc.)
+      const validImageTypes = ["image/jpeg", "image/png"];
       const isValidType = validImageTypes.includes(newFile.type);
 
       if (!isValidType) {
@@ -401,7 +399,7 @@ const Keyboard: NextPage = () => {
           setNotification({
             modalOpen: true,
             status: "error",
-            text: "Please upload only images.",
+            text: "Only PNG or JPEG images can be attached.",
           })
         );
         return;
@@ -549,7 +547,6 @@ const Keyboard: NextPage = () => {
       onSubmit={sendAgentMessage}
       className="flex flex-col items-start justify-between rounded-lg space-y-3"
     >
-      <Meteors />
       {shouldShowUpgrade && (
         <div className="flex justify-center items-center w-full bg-[#1c1c1d] border border-[#2a2a2b] p-2 rounded-lg">
           <p className="text-xs font-sans font-medium text-[#b1b1b1] text-center">
@@ -576,8 +573,12 @@ const Keyboard: NextPage = () => {
           </motion.div>
         )}
       </AnimatePresence>
-      {/* Main Input Container */}
-      <div className=" relative rounded-lg flex flex-col items-start justify-center shadow-lg min-h-[120px] w-full ">
+      {/* Main Input Container — Meteors clipped here so they never cover Messages above */}
+      <div className="relative flex min-h-[120px] w-full flex-col items-start justify-center overflow-hidden rounded-lg shadow-lg">
+        <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden rounded-lg">
+          <Meteors number={5} />
+        </div>
+        <div className="relative z-10 flex w-full min-w-0 flex-col">
         {/* Attachment Preview */}
         <AttachmentPreview
           attachments={attachments}
@@ -735,7 +736,7 @@ const Keyboard: NextPage = () => {
                 onClick={handleAttachClick}
                 type="button"
                 className="cursor-pointer p-2 rounded-md text-xs font-sans font-medium gap-x-1 flex justify-center items-center transition-colors text-[#b1b1b1] hover:bg-[#2a292c]"
-                title="Attach image"
+                title="Attach PNG or JPEG"
               >
                 <FaPaperclip />
               </button>
@@ -743,7 +744,7 @@ const Keyboard: NextPage = () => {
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                accept="image/*"
+                accept=".jpg,.jpeg,.png,image/jpeg,image/png"
                 className="hidden"
               />
 
@@ -762,6 +763,7 @@ const Keyboard: NextPage = () => {
               </button>
             </div>
           )}
+        </div>
         </div>
       </div>
     </form>

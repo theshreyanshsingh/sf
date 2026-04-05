@@ -1,5 +1,8 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 
+/** code_write payload entry — `kind` from storage layer (new path vs existing). */
+export type FileWriteKind = "created" | "updated";
+
 // Tool result interface for todo_write and other tools
 export interface ToolResult {
   UsedTool?: string;
@@ -7,8 +10,12 @@ export interface ToolResult {
     success?: boolean;
     title?: string;
     output?: string;
-    fileWrite?: { path: string; content: string };
-    fileWrites?: Array<{ path: string; content: string }>;
+    fileWrite?: { path: string; content: string; kind?: FileWriteKind };
+    fileWrites?: Array<{
+      path: string;
+      content: string;
+      kind?: FileWriteKind;
+    }>;
     metadata?: {
       todos?: Array<{
         id: string;
@@ -24,8 +31,8 @@ export interface ToolResult {
       completed?: number;
     };
   };
-  fileWrite?: { path: string; content: string };
-  fileWrites?: Array<{ path: string; content: string }>;
+  fileWrite?: { path: string; content: string; kind?: FileWriteKind };
+  fileWrites?: Array<{ path: string; content: string; kind?: FileWriteKind }>;
 }
 
 // Message interface for chat messages

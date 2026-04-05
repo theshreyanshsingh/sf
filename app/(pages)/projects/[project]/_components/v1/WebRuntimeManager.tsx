@@ -12,6 +12,7 @@ import {
   onServerReady,
   syncFiles,
 } from "@/app/helpers/webcontainer";
+import { mergePreviewBridgeScripts } from "@/app/helpers/mergePreviewBridgeScripts";
 import { WEB_DEV_SERVER_SHELL_COMMAND } from "@/app/helpers/webContainerDevServerCommand";
 
 const FALLBACK_BOOTSTRAP_TIMEOUT_MS = 8000;
@@ -296,7 +297,10 @@ const WebRuntimeManager = () => {
     const nextSync = syncSequenceRef.current
       .catch(() => undefined)
       .then(async () => {
-        await syncFiles(normalizedProjectFiles);
+        const withBridge = await mergePreviewBridgeScripts(
+          normalizedProjectFiles,
+        );
+        await syncFiles(withBridge);
         lastCompletedSyncSignatureRef.current = projectFileSignature;
       });
 

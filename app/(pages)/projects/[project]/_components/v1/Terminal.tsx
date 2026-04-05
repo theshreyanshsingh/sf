@@ -534,12 +534,6 @@ const Terminal = () => {
             </div>
           ))}
         </div>
-        <button
-          onClick={() => addTerminal()}
-          className="px-3 h-full text-[#949494] hover:text-white font-sans text-xs flex items-center justify-center cursor-pointer hover:bg-[#2a2a2a] flex-shrink-0"
-        >
-          Add a new terminal
-        </button>
       </div>
 
       <div className="flex-1 relative">

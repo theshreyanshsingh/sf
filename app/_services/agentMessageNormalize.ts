@@ -1,5 +1,9 @@
 import type { AppDispatch } from "../redux/store";
-import type { Message, ToolResult } from "../redux/reducers/chatSlice";
+import type {
+  FileWriteKind,
+  Message,
+  ToolResult,
+} from "../redux/reducers/chatSlice";
 import type { Todo } from "../redux/reducers/todosSlice";
 import { updateTodosFromTool } from "../redux/reducers/todosSlice";
 
@@ -27,20 +31,65 @@ function normalizeToolResultShape(tr: unknown): ToolResult | undefined {
   return tr as ToolResult;
 }
 
+/** Match backend `Agent.js` / `code_write` path keys for `fileWriteActions` lookup. */
+function normalizeWritePathKey(p: string): string {
+  return String(p || "")
+    .trim()
+    .replace(/^\/+/, "")
+    .replace(/^workspace\//, "");
+}
+
+/** Apply `fileWriteActions` from persisted tool `result` (Mongo Mixed) — kind is stored here even when `fileWrite` subdoc omits it. */
+function applyKindsFromToolResultFileWriteActions(
+  byPath: Map<string, { path: string; content: string; kind?: FileWriteKind }>,
+  toolCalls: unknown[],
+) {
+  for (const tc of toolCalls) {
+    if (!isRecord(tc) || tc.tool !== "code_write" || tc.result == null) continue;
+    const r =
+      typeof tc.result === "string" ? tryParseJson(tc.result) : tc.result;
+    if (!isRecord(r)) continue;
+    const actions = r.fileWriteActions;
+    if (!Array.isArray(actions)) continue;
+    for (const act of actions) {
+      if (!isRecord(act) || typeof act.path !== "string") continue;
+      const k: FileWriteKind | undefined =
+        act.kind === "created" || act.kind === "updated" ? act.kind : undefined;
+      if (!k) continue;
+      const actNorm = normalizeWritePathKey(act.path);
+      for (const [path, w] of byPath) {
+        const pNorm = normalizeWritePathKey(path);
+        if (path === act.path || pNorm === actNorm) {
+          byPath.set(path, { ...w, kind: k });
+          break;
+        }
+      }
+    }
+  }
+}
+
 function collectFileWritesFromDb(raw: Record<string, unknown>): Array<{
   path: string;
   content: string;
+  kind?: FileWriteKind;
 }> {
-  const out: Array<{ path: string; content: string }> = [];
-  const push = (path: unknown, content: unknown) => {
+  const out: Array<{ path: string; content: string; kind?: FileWriteKind }> =
+    [];
+  const push = (path: unknown, content: unknown, kind?: unknown) => {
     if (typeof path !== "string") return;
+    const k: FileWriteKind | undefined =
+      kind === "created" || kind === "updated" ? kind : undefined;
     if (typeof content === "string") {
-      out.push({ path, content });
+      out.push({ path, content, ...(k ? { kind: k } : {}) });
       return;
     }
     if (content != null && typeof content === "object") {
       try {
-        out.push({ path, content: JSON.stringify(content, null, 2) });
+        out.push({
+          path,
+          content: JSON.stringify(content, null, 2),
+          ...(k ? { kind: k } : {}),
+        });
       } catch {
         /* skip */
       }
@@ -48,7 +97,17 @@ function collectFileWritesFromDb(raw: Record<string, unknown>): Array<{
   };
 
   if (isRecord(raw.fileWrite)) {
-    push(raw.fileWrite.path, raw.fileWrite.content);
+    push(
+      raw.fileWrite.path,
+      raw.fileWrite.content,
+      raw.fileWrite.kind,
+    );
+  }
+
+  const topFileWrites = Array.isArray(raw.fileWrites) ? raw.fileWrites : [];
+  for (const fw of topFileWrites) {
+    if (!isRecord(fw)) continue;
+    push(fw.path, fw.content, fw.kind);
   }
 
   const toolCalls = Array.isArray(raw.toolCalls) ? raw.toolCalls : [];
@@ -56,7 +115,7 @@ function collectFileWritesFromDb(raw: Record<string, unknown>): Array<{
     if (!isRecord(tc)) continue;
     if (tc.tool !== "code_write") continue;
     if (isRecord(tc.fileWrite)) {
-      push(tc.fileWrite.path, tc.fileWrite.content);
+      push(tc.fileWrite.path, tc.fileWrite.content, tc.fileWrite.kind);
     }
     const args = isRecord(tc.args) ? tc.args : null;
     if (
@@ -78,8 +137,12 @@ function collectFileWritesFromDb(raw: Record<string, unknown>): Array<{
     }
   }
 
-  const byPath = new Map<string, { path: string; content: string }>();
+  const byPath = new Map<
+    string,
+    { path: string; content: string; kind?: FileWriteKind }
+  >();
   out.forEach((w) => byPath.set(w.path, w));
+  applyKindsFromToolResultFileWriteActions(byPath, toolCalls);
   return Array.from(byPath.values());
 }
 

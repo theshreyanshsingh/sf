@@ -1331,8 +1331,11 @@ Update the React components NOW to preserve all formatting.`;
               <div className="rounded-xl border border-[#2a2a2b] bg-[#141415]/95 backdrop-blur-xl p-4 text-sm text-white shadow-2xl">
                 <div className="flex flex-wrap gap-3">
                   <div className="flex-1 min-w-[180px]">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-[#4a90e2] mb-2">
-                      Pages
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-[#4a90e2] mb-2 flex flex-wrap items-center gap-2">
+                      <span>Pages</span>
+                      <span className="normal-case tracking-normal text-[9px] font-medium px-1.5 py-0.5 rounded-full border border-[#2a2a2b] text-[#a0a0a8]">
+                        Beta
+                      </span>
                     </p>
                     <div className="space-y-1 max-h-40 overflow-y-auto">
                       {(siteGraph?.pages || []).map((page) => (

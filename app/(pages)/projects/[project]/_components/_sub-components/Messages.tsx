@@ -1,12 +1,25 @@
 "use client";
 import { motion, AnimatePresence } from "framer-motion";
-import { FaCode, FaFilePdf, FaUndo } from "react-icons/fa";
+import { FaCode, FaFilePdf } from "react-icons/fa";
 import Image from "next/image";
-import { LuLoaderCircle } from "react-icons/lu";
+import {
+  LuCheck,
+  LuCornerUpLeft,
+  LuLoaderCircle,
+} from "react-icons/lu";
+import { IoClose } from "react-icons/io5";
 
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "@/app/redux/store";
-import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  Fragment,
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -16,6 +29,7 @@ import { usePathname } from "next/navigation";
 import {
   setMessages,
   clearMessages,
+  type FileWriteKind,
   type Message,
 } from "@/app/redux/reducers/chatSlice";
 import type { Todo } from "@/app/redux/reducers/todosSlice";
@@ -60,12 +74,39 @@ const CollapsibleImage = ({ src, alt }: { src: string; alt?: string }) => {
   );
 };
 
+type FileWriteEntry = { path: string; content: string; kind?: FileWriteKind };
+
+function verbForFileWrite(kind: FileWriteKind | undefined): string {
+  if (kind === "created") return "Created";
+  if (kind === "updated") return "Edited";
+  return "Wrote";
+}
+
+function summarizeFileWriteGroup(writes: FileWriteEntry[]): string {
+  if (writes.length === 0) return "";
+  const allKind = (k: FileWriteKind | undefined) =>
+    writes.every((w) => w.kind === k);
+  if (writes.every((w) => !w.kind)) {
+    return `Wrote ${writes.length} file${writes.length > 1 ? "s" : ""}`;
+  }
+  if (allKind("created")) {
+    return `Created ${writes.length} file${writes.length > 1 ? "s" : ""}`;
+  }
+  if (allKind("updated")) {
+    return `Edited ${writes.length} file${writes.length > 1 ? "s" : ""}`;
+  }
+  const c = writes.filter((w) => w.kind === "created").length;
+  const u = writes.filter((w) => w.kind === "updated").length;
+  const legacy = writes.filter((w) => !w.kind).length;
+  const parts: string[] = [];
+  if (c) parts.push(`${c} created`);
+  if (u) parts.push(`${u} edited`);
+  if (legacy) parts.push(`${legacy} changed`);
+  return parts.join(", ");
+}
+
 // File Writes Component
-const FileWrites = ({
-  fileWrites,
-}: {
-  fileWrites: Array<{ path: string; content: string }>;
-}) => {
+const FileWrites = ({ fileWrites }: { fileWrites: FileWriteEntry[] }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const dispatch = useDispatch();
 
@@ -101,7 +142,8 @@ const FileWrites = ({
       >
         {fileWrites.length === 1 ? (
           <div className={`text-xs text-gray-300`}>
-            Wrote {formatPath(fileWrites[0].path)}
+            {verbForFileWrite(fileWrites[0].kind)}{" "}
+            {formatPath(fileWrites[0].path)}
           </div>
         ) : (
           <>
@@ -109,9 +151,7 @@ const FileWrites = ({
               onClick={() => setIsExpanded(!isExpanded)}
               className={`w-full flex items-center justify-between text-xs space-x-2 text-gray-300`}
             >
-              <span>
-                Wrote {fileWrites.length} file{fileWrites.length > 1 ? "s" : ""}
-              </span>
+              <span>{summarizeFileWriteGroup(fileWrites)}</span>
               {isExpanded ? (
                 <FaChevronUp className="text-xs" />
               ) : (
@@ -125,6 +165,9 @@ const FileWrites = ({
                     key={idx}
                     className={`text-xs pl-2 py-1 rounded text-gray-300 hover:bg-[#2a2a2a]`}
                   >
+                    <span className="text-zinc-500 mr-1.5">
+                      {verbForFileWrite(file.kind)}
+                    </span>
                     {formatPath(file.path)}
                   </div>
                 ))}
@@ -146,7 +189,7 @@ function formatAgentDurationMs(ms: number): string {
 }
 
 const AgentRunBanner = ({ durationMs }: { durationMs: number }) => (
-  <div className="w-full min-w-0 self-stretch flex items-center gap-3 my-1 text-zinc-400 text-xs">
+  <div className="w-full min-w-0 self-stretch flex items-center gap-3 my-0 text-zinc-400 text-xs">
     <div className="h-px min-w-0 flex-1 bg-zinc-700/80" />
     <span className="shrink-0 font-medium tracking-tight">
       Worked for {formatAgentDurationMs(durationMs)}
@@ -164,7 +207,12 @@ function lineLooksLikeWroteFilesCount(line: string): boolean {
     .replace(/^[-*+]\s+/, "")
     .replace(/^\d+\.\s+/, "")
     .trim();
-  return /^Wrote\s+\d+\s+files?\.?$/i.test(t);
+  return (
+    /^Wrote\s+\d+\s+files?\.?$/i.test(t) ||
+    /^\d+\s+files?\s+created(?:,\s*\d+\s+(?:updated|edited))?$/i.test(t) ||
+    /^\d+\s+files?\s+(?:updated|edited)$/i.test(t) ||
+    /^\d+\s+file\s+created,\s*\d+\s+(?:updated|edited)$/i.test(t)
+  );
 }
 
 /** Model echoes single-file writes; FileWrites chip already shows paths. */
@@ -174,8 +222,8 @@ function lineLooksLikeWroteFileEcho(line: string): boolean {
     .replace(/^#+\s*/, "")
     .replace(/^>\s*/, "")
     .trim();
-  if (/^wrote\s+file:\s*\S+/i.test(t)) return true;
-  if (/^wrote\s+file\s*:\s*\S+/i.test(t)) return true;
+  if (/^(wrote|created|updated|edited)\s+file:\s*\S+/i.test(t)) return true;
+  if (/^(wrote|created|updated|edited)\s+file\s*:\s*\S+/i.test(t)) return true;
   if (/^wrote\s+\/[^\s`]+/i.test(t)) return true;
   if (/^wrote\s+[`']?[\w./\-]+\.(jsx?|tsx?|mjsx?|json|html|css|vue|svelte)\b/i.test(t))
     return true;
@@ -236,13 +284,32 @@ const getAttachmentFileType = (url: string): "image" | "pdf" | "code" => {
   return "image";
 };
 
-const filterRenderableAttachments = (attachments?: any[]) => {
+/** User chat attachments: only PNG/JPEG (no SVG, WebP, GIF, etc.). */
+function isAllowedChatImageAttachment(att: any): boolean {
+  const url = att?.url != null ? String(att.url).trim() : "";
+  const mime = String(
+    att?.fileType ?? att?.mimeType ?? att?.contentType ?? "",
+  ).toLowerCase();
+  if (mime === "image/jpeg" || mime === "image/png") return true;
+  if (/^data:image\/jpeg[;,]/i.test(url) || /^data:image\/png[;,]/i.test(url))
+    return true;
+  const path = url.split(/[?#]/)[0] ?? url;
+  return /\.(jpe?g|png)$/i.test(path);
+}
+
+const filterRenderableAttachments = (
+  attachments?: any[],
+  opts?: { chatImagesPngJpegOnly?: boolean },
+) => {
   if (!attachments || attachments.length === 0) return [];
   return attachments.filter((att) => {
     const url = att?.url != null ? String(att.url).trim() : "";
     const ft = att?.type || getAttachmentFileType(url);
     if (ft === "code" && !url) {
       return false;
+    }
+    if (ft === "image" && opts?.chatImagesPngJpegOnly) {
+      if (!isAllowedChatImageAttachment(att)) return false;
     }
     return true;
   });
@@ -292,15 +359,124 @@ const getAttachmentDisplayName = (attachment: any) => {
 const MessageAttachments = ({
   attachments,
   alignment = "end",
+  variant = "default",
 }: {
   attachments: any[] | undefined;
   alignment?: "start" | "end";
+  variant?: "default" | "promptCard";
 }) => {
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!lightboxSrc) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightboxSrc(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxSrc]);
+
   // Filter out non-actionable "Code Reference" attachments (from backend references
   // e.g. file paths like "src/App.jsx" with url: ""). They add noise with no link to open.
-  const filteredAttachments = filterRenderableAttachments(attachments);
+  const filteredAttachments = filterRenderableAttachments(
+    attachments,
+    variant === "promptCard" ? { chatImagesPngJpegOnly: true } : undefined,
+  );
 
   if (filteredAttachments.length === 0) return null;
+
+  if (variant === "promptCard") {
+    return (
+      <>
+        <div
+          className={`flex max-w-full flex-wrap gap-1 ${
+            alignment === "end" ? "justify-end" : "justify-start"
+          }`}
+        >
+          <AnimatePresence>
+            {filteredAttachments.map((attachment, attIndex) => {
+              const fileType =
+                attachment.type || getAttachmentFileType(attachment.url || "");
+              const displayName = getAttachmentDisplayName(attachment);
+              return (
+                <motion.div
+                  key={attIndex}
+                  className="relative h-8 w-8 shrink-0 overflow-hidden rounded-[10px] border border-[#3f3f46] bg-[#27272a] shadow-sm"
+                  initial={{ opacity: 0, scale: 0.92 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.85 }}
+                  transition={{ duration: 0.2 }}
+                  title={displayName}
+                >
+                  {fileType === "image" && attachment.url && (
+                    <button
+                      type="button"
+                      onClick={() => setLightboxSrc(String(attachment.url))}
+                      className="relative block h-full w-full cursor-zoom-in"
+                      title="View image"
+                    >
+                      <Image
+                        src={attachment.url}
+                        alt={displayName}
+                        width={32}
+                        height={32}
+                        className="h-full w-full object-cover"
+                        unoptimized
+                      />
+                    </button>
+                  )}
+                  {fileType === "pdf" && (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <FaFilePdf className="text-sm text-white/70" />
+                    </div>
+                  )}
+                  {fileType === "code" && (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <FaCode className="text-sm text-[#4a90e2]" />
+                    </div>
+                  )}
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
+        </div>
+        {lightboxSrc && typeof document !== "undefined"
+          ? createPortal(
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label="Image preview"
+                className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+                onClick={() => setLightboxSrc(null)}
+              >
+                <div
+                  className="relative max-h-[min(90vh,900px)] max-w-[min(96vw,1200px)]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setLightboxSrc(null)}
+                    className="absolute -right-1 -top-10 z-10 rounded-md p-1.5 text-zinc-300 transition hover:bg-white/10 hover:text-white md:-right-3 md:-top-3 md:bg-black/50"
+                    title="Close"
+                  >
+                    <IoClose size={22} />
+                  </button>
+                  <div className="max-h-[min(90vh,900px)] max-w-[min(96vw,1200px)] overflow-hidden rounded-lg border border-zinc-700/80 shadow-2xl">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={lightboxSrc}
+                      alt=""
+                      className="max-h-[min(90vh,900px)] w-full object-contain"
+                    />
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )
+          : null}
+      </>
+    );
+  }
 
   return (
     <div
@@ -369,6 +545,38 @@ const MessageAttachments = ({
   );
 };
 
+/** Strip pasted preview URLs / stack traces often prepended before the real prompt. */
+function sanitizeUserMessageDisplayContent(content: string): string {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let skippingLead = true;
+  for (const line of lines) {
+    const t = line.trim();
+    if (skippingLead) {
+      if (t.length === 0) continue;
+      const noise =
+        (/^https?:\/\//i.test(t) &&
+          (/\.local/i.test(t) ||
+            /webcontainer/i.test(t) ||
+            /localhost/i.test(t))) ||
+        /node_modules[/\\]/i.test(t) ||
+        /^at\s+/.test(t) ||
+        /\bat\s+[\w.]+\s*\([^)]*\.(js|mjs|tsx|ts|jsx)/i.test(t) ||
+        /react-dom_client|performUnitOfWork|commitLayoutEffect/i.test(t) ||
+        /^preview\s*path:/i.test(t) ||
+        /\.vite[/\\]deps[/\\]/i.test(t) ||
+        /^\([^)]*\.(js|tsx)(:\d+)+/i.test(t) ||
+        (/\)\s*[✅✓✔]/.test(t) &&
+          /FAQ|accordion|hero|benefits|pricing|grid/i.test(t) &&
+          t.length < 180);
+      if (noise) continue;
+      skippingLead = false;
+    }
+    out.push(line);
+  }
+  return out.join("\n").trim();
+}
+
 const Messages = () => {
   const dispatch = useDispatch();
   const { data: session } = useSession();
@@ -401,6 +609,12 @@ const Messages = () => {
   );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  const scrollChatToLatest = useCallback(() => {
+    if (!messages?.length) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages?.length]);
+
   const hasLoadedInitialMessages = useRef(false);
   const currentChatIdRef = useRef<string | null>(null);
   const getChatMessagesRef = useRef(getChatMessages);
@@ -494,7 +708,7 @@ const Messages = () => {
       return { text: "Writing code", showHeader: shouldShowHeader() };
     }
     if (lastTool === "todo_write") {
-      return { text: "Thinking tasks", showHeader: shouldShowHeader() };
+      return { text: "Planning Next Moves", showHeader: shouldShowHeader() };
     }
     if (lastTool === "issue_write") {
       return { text: "Wrote issue", showHeader: shouldShowHeader() };
@@ -617,9 +831,8 @@ const Messages = () => {
               }),
             );
             syncTodosFromHydratedMessages(convertedMessages, dispatch);
-            // Scroll to bottom after initial load
             setTimeout(() => {
-              messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+              scrollChatToLatest();
             }, 100);
           } else {
             // Reset flag if fetch failed so we can retry
@@ -644,6 +857,7 @@ const Messages = () => {
     getProjectIdFromPath,
     convertChatToMessage,
     dispatch,
+    scrollChatToLatest,
   ]);
 
   // Load more messages when scrolling to top
@@ -716,25 +930,24 @@ const Messages = () => {
     dispatch,
   ]);
 
-  // Attach scroll listener
+  // Attach scroll listener (container is root when single-scroll, history pane when split-turn)
   useEffect(() => {
     const container = messagesContainerRef.current;
-    if (container) {
-      container.addEventListener("scroll", handleScroll);
-      return () => {
-        container.removeEventListener("scroll", handleScroll);
-      };
-    }
+    if (!container) return;
+    container.addEventListener("scroll", handleScroll);
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+    };
   }, [handleScroll]);
 
   // Scroll to bottom when new messages are added (from streaming)
   useEffect(() => {
     if (messages && messages.length > 0 && !isLoadingMore) {
       setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        scrollChatToLatest();
       }, 100);
     }
-  }, [messages, isLoadingMore]);
+  }, [messages, isLoadingMore, scrollChatToLatest]);
 
   // Function to copy message content to clipboard
   const handleCopyMessage = async (content: string, messageId: string) => {
@@ -865,19 +1078,17 @@ const Messages = () => {
   return (
     <div
       ref={messagesContainerRef}
-      className={`w-full h-full max-w-3xl py-4 px-2 space-y-3 text-[13px] text-balance leading-relaxed font-sans font-medium overflow-y-auto overflow-x-hidden scroll-smooth text-white`}
+      className="w-full h-full max-w-3xl overflow-y-auto overflow-x-hidden scroll-smooth px-2 pb-4 text-[13px] text-balance leading-relaxed font-sans font-medium text-white"
       style={{ scrollBehavior: "smooth" }}
     >
-      {/* Load more indicator at top */}
-      {isLoadingMore && (
-        <div className="flex justify-center items-center py-2">
-          <LuLoaderCircle className={`text-lg animate-spin text-white`} />
-        </div>
-      )}
-      {(() => {
-        const extractMessageFileWrites = (
-          msg: Message,
-        ): Array<{ path: string; content: string }> => {
+      <div className="flex min-h-min flex-col gap-2 pt-3">
+        {isLoadingMore && (
+          <div className="flex justify-center items-center py-2">
+            <LuLoaderCircle className={`text-lg animate-spin text-white`} />
+          </div>
+        )}
+        {(() => {
+        const extractMessageFileWrites = (msg: Message): FileWriteEntry[] => {
           const rawCandidates = [
             msg?.toolResult?.fileWrite,
             msg?.toolResult?.fileWrites,
@@ -887,7 +1098,7 @@ const Messages = () => {
             (msg as Message & { fileWrites?: unknown }).fileWrites,
           ];
 
-          const writes: Array<{ path: string; content: string }> = [];
+          const writes: FileWriteEntry[] = [];
           const normalizeContent = (c: unknown): string | null => {
             if (typeof c === "string") return c;
             if (c != null && typeof c === "object") {
@@ -913,18 +1124,22 @@ const Messages = () => {
                   (entry as { content?: unknown }).content,
                 );
                 if (content != null) {
+                  const k = (entry as { kind?: string }).kind;
+                  const kind: FileWriteKind | undefined =
+                    k === "created" || k === "updated" ? k : undefined;
                   writes.push({
                     path: (entry as { path: string }).path,
                     content,
+                    ...(kind ? { kind } : {}),
                   });
                 }
               }
             });
           });
 
-          const deduped = new Map<string, { path: string; content: string }>();
+          const deduped = new Map<string, FileWriteEntry>();
           writes.forEach((write) => {
-            deduped.set(`${write.path}::${write.content}`, write);
+            deduped.set(write.path, write);
           });
 
           return Array.from(deduped.values());
@@ -970,11 +1185,11 @@ const Messages = () => {
         const groupFileWrites = () => {
           const groups: Array<{
             startIndex: number;
-            fileWrites: Array<{ path: string; content: string }>;
+            fileWrites: FileWriteEntry[];
           }> = [];
           let currentGroup: {
             startIndex: number;
-            fileWrites: Array<{ path: string; content: string }>;
+            fileWrites: FileWriteEntry[];
           } | null = null;
 
           messages?.forEach((msg, index) => {
@@ -1006,14 +1221,9 @@ const Messages = () => {
         const fileWriteGroups = groupFileWrites();
 
         // Create a map of message indices to file write groups
-        const fileWriteMap = new Map<
-          number,
-          Array<{ path: string; content: string }>
-        >();
-        const dedupeFileWritesByPath = (
-          writes: Array<{ path: string; content: string }>,
-        ): Array<{ path: string; content: string }> => {
-          const byPath = new Map<string, { path: string; content: string }>();
+        const fileWriteMap = new Map<number, FileWriteEntry[]>();
+        const dedupeFileWritesByPath = (writes: FileWriteEntry[]): FileWriteEntry[] => {
+          const byPath = new Map<string, FileWriteEntry>();
           for (const w of writes) {
             byPath.set(w.path, w);
           }
@@ -1072,9 +1282,35 @@ const Messages = () => {
             -1,
           ) ?? -1;
 
+        const isLastAssistantBeforeNextUser = (i: number): boolean => {
+          if (!messages || i < 0 || i >= messages.length) return false;
+          if (messages[i].role !== "assistant") return false;
+          const next = messages[i + 1];
+          return !next || next.role === "user";
+        };
+
+        /** Duration for the user prompt whose assistant block ends at index `i` (i = last assistant of that turn). */
+        const durationMsBannerForTurnEndingAt = (i: number): number | null => {
+          if (!messages || !isLastAssistantBeforeNextUser(i)) return null;
+          let prevUser = -1;
+          for (let j = i; j >= 0; j--) {
+            if (messages[j].role === "user") {
+              prevUser = j;
+              break;
+            }
+          }
+          for (let j = i; j > prevUser; j--) {
+            const d = messages[j].agentRun?.durationMs;
+            if (typeof d === "number" && d > 0) return d;
+          }
+          return null;
+        };
+
         /**
          * Mirrors the assistant branches in messages.map that return null, so we can pick exactly
          * one "Superblocks" label per user turn (first visible assistant row after that user).
+         * Uses stripped markdown (same as on-screen) so rows that only carry redundant prose
+         * (e.g. "Wrote N files") do not count as visible — avoids empty DOM nodes under space-y-3.
          */
         const assistantRowWouldRender = (originalIndex: number): boolean => {
           if (
@@ -1147,24 +1383,37 @@ const Messages = () => {
             return false;
           }
 
+          const inCurrentReplyTail =
+            isStreamActive &&
+            streamChatId === chatId &&
+            latestUserMessageIndex >= 0 &&
+            originalIndex > latestUserMessageIndex;
+
           if (hasRenderableFileWrites) {
             const isFirstInGroup =
               originalIndex === 0 ||
               extractMessageFileWrites(messages[originalIndex - 1]!).length ===
                 0;
             if (!isFirstInGroup) {
-              const hasVisibleAssistantText =
-                typeof msg.content === "string" &&
-                msg.content.trim().length > 0;
-              if (!hasVisibleAssistantText) return false;
+              const metaTodosMid = msg.toolResult?.result?.metadata;
+              const rawSnapMid = metaTodosMid?.todos || [];
+              const showTasksMid =
+                msg.toolResult?.UsedTool === "todo_write" &&
+                rawSnapMid.length > 0 &&
+                !(inCurrentReplyTail && reduxTodos.length > 0);
+              const strippedMid =
+                typeof msg.content === "string"
+                  ? stripRedundantAssistantProse(msg.content, {
+                      stripWroteFiles: true,
+                      stripTasksHeading: showTasksMid,
+                      stripFileEchoLines: true,
+                    })
+                  : "";
+              const hasVisibleContinueText =
+                typeof strippedMid === "string" && strippedMid.trim().length > 0;
+              if (!hasVisibleContinueText) return false;
             }
           }
-
-          const inCurrentReplyTail =
-            isStreamActive &&
-            streamChatId === chatId &&
-            latestUserMessageIndex >= 0 &&
-            originalIndex > latestUserMessageIndex;
 
           if (
             isStreamActive &&
@@ -1183,12 +1432,42 @@ const Messages = () => {
             (msg.toolResult?.result?.metadata?.todos?.length ?? 0) > 0 &&
             !(inCurrentReplyTail && msg.role === "assistant");
 
+          const metaTodos = msg.toolResult?.result?.metadata;
+          const rawSnapTodos = metaTodos?.todos || [];
+          const showTasksCardInsideRow =
+            msg.toolResult?.UsedTool === "todo_write" &&
+            rawSnapTodos.length > 0 &&
+            !(inCurrentReplyTail && reduxTodos.length > 0);
+
+          const shouldHideAssistantText = isRedundantAttachmentMessage(
+            msg.content,
+            renderableAttachments,
+          );
+
+          const assistantMarkdownSource =
+            typeof msg.content === "string"
+              ? stripRedundantAssistantProse(msg.content, {
+                  stripWroteFiles: hasRenderableFileWrites,
+                  stripTasksHeading: showTasksCardInsideRow,
+                  stripFileEchoLines: true,
+                })
+              : msg.content;
+
+          const hasVisibleMarkdown =
+            typeof assistantMarkdownSource === "string" &&
+            assistantMarkdownSource.trim().length > 0 &&
+            !shouldHideAssistantText &&
+            msg.toolResult?.UsedTool !== "generate_image";
+
+          const turnBannerMs = durationMsBannerForTurnEndingAt(originalIndex);
+
           if (
-            !hasText &&
+            !hasVisibleMarkdown &&
             !hasAttachments &&
             !hasGeneratedImage &&
             !hasRenderableFileWrites &&
-            !hasTodoCard
+            !hasTodoCard &&
+            turnBannerMs == null
           ) {
             return false;
           }
@@ -1239,40 +1518,14 @@ const Messages = () => {
           return undefined;
         };
 
-        const isLastAssistantBeforeNextUser = (i: number): boolean => {
-          if (!messages || i < 0 || i >= messages.length) return false;
-          if (messages[i].role !== "assistant") return false;
-          const next = messages[i + 1];
-          return !next || next.role === "user";
-        };
-
-        /** Duration for the user prompt whose assistant block ends at index `i` (i = last assistant of that turn). */
-        const durationMsBannerForTurnEndingAt = (i: number): number | null => {
-          if (!messages || !isLastAssistantBeforeNextUser(i)) return null;
-          let prevUser = -1;
-          for (let j = i; j >= 0; j--) {
-            if (messages[j].role === "user") {
-              prevUser = j;
-              break;
-            }
-          }
-          for (let j = i; j > prevUser; j--) {
-            const d = messages[j].agentRun?.durationMs;
-            if (typeof d === "number" && d > 0) return d;
-          }
-          return null;
-        };
-
         const showLiveTasksPanel =
           isStreamActive &&
           streamChatId === chatId &&
           reduxTodos.length > 0;
 
         if (messages && messages.length > 0) {
-          return (
-            <>
-              {messages.map((msg, originalIndex) => {
-                // Skip messages that should be hidden
+          const renderChatRow = (originalIndex: number): ReactNode => {
+                const msg = messages[originalIndex]!;
 
                 const isLastMessage = originalIndex === messages.length - 1;
                 const isGenerateImage =
@@ -1335,24 +1588,38 @@ const Messages = () => {
                   return null;
                 }
 
+                const inCurrentReplyTail =
+                  isStreamActive &&
+                  streamChatId === chatId &&
+                  latestUserMessageIndex >= 0 &&
+                  originalIndex > latestUserMessageIndex;
+
                 if (hasRenderableFileWrites) {
                   const isFirstInGroup =
                     originalIndex === 0 ||
                     extractMessageFileWrites(messages[originalIndex - 1]!)
                       .length === 0;
                   if (!isFirstInGroup) {
-                    const hasVisibleAssistantText =
-                      typeof msg.content === "string" &&
-                      msg.content.trim().length > 0;
-                    if (!hasVisibleAssistantText) return null;
+                    const metaTodosMid = msg.toolResult?.result?.metadata;
+                    const rawSnapMid = metaTodosMid?.todos || [];
+                    const showTasksMid =
+                      msg.toolResult?.UsedTool === "todo_write" &&
+                      rawSnapMid.length > 0 &&
+                      !(inCurrentReplyTail && reduxTodos.length > 0);
+                    const strippedMid =
+                      typeof msg.content === "string"
+                        ? stripRedundantAssistantProse(msg.content, {
+                            stripWroteFiles: true,
+                            stripTasksHeading: showTasksMid,
+                            stripFileEchoLines: true,
+                          })
+                        : "";
+                    const hasVisibleContinueText =
+                      typeof strippedMid === "string" &&
+                      strippedMid.trim().length > 0;
+                    if (!hasVisibleContinueText) return null;
                   }
                 }
-
-                const inCurrentReplyTail =
-                  isStreamActive &&
-                  streamChatId === chatId &&
-                  latestUserMessageIndex >= 0 &&
-                  originalIndex > latestUserMessageIndex;
 
                 if (
                   isStreamActive &&
@@ -1389,68 +1656,83 @@ const Messages = () => {
                     msg.content,
                     attachments,
                   );
+                  const userDisplayText =
+                    typeof msg.content === "string" && !shouldHideUserText
+                      ? sanitizeUserMessageDisplayContent(msg.content)
+                      : "";
+                  const codeInfo = findCodeUrlForUserMessage(originalIndex);
+
+                  const hasPromptThumbs =
+                    filterRenderableAttachments(attachments, {
+                      chatImagesPngJpegOnly: true,
+                    }).length > 0;
 
                   return (
-                    <div
-                      key={msg.id || originalIndex}
-                      className="w-full justify-end flex flex-col items-end gap-2"
-                    >
-                      <div className="flex justify-center items-end flex-col gap-2 max-w-[80%]">
-                        <p
-                          className={`font-sans font-medium text-xs text-gray-400`}
-                        >
-                          User
-                        </p>
-
-                        {/* Attachments Preview */}
-                        <MessageAttachments
-                          attachments={attachments}
-                          alignment="end"
-                        />
-
-                        {/* Message text */}
-                        {msg.content && !shouldHideUserText && (
-                          <p className={`break-words text-end text-white/80`}>
-                            {msg.content}
-                          </p>
-                        )}
-
-                        {/* Restore button: shown on user message if AI made code changes after it */}
-                        {(() => {
-                          const codeInfo =
-                            findCodeUrlForUserMessage(originalIndex);
-                          if (!codeInfo || !codeInfo.id) return null;
-                          return (
-                            <div className="flex justify-end mt-2">
-                              <button
-                                type="button"
-                                onClick={() => handleRestoreCode(codeInfo.id)}
-                                disabled={
-                                  restoringMessageId === codeInfo.id ||
-                                  restoredMessageIds.has(codeInfo.id)
-                                }
-                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors border border-[#262626] bg-transparent text-gray-400 hover:bg-[#262626] hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {restoringMessageId === codeInfo.id ? (
-                                  <LuLoaderCircle
-                                    className="animate-spin flex-shrink-0"
-                                    size={12}
+                    <div className="relative z-[2] w-full bg-[#0F0F0F] py-2">
+                      <div className="mx-auto w-full max-w-lg px-1">
+                        <div className="overflow-hidden rounded-xl border border-[#2e2e32] bg-[#1A1A1C] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
+                          {(userDisplayText ||
+                            codeInfo?.id ||
+                            hasPromptThumbs) && (
+                            <div className="relative px-2.5 py-2.5">
+                              {hasPromptThumbs ? (
+                                <div className="mb-2">
+                                  <MessageAttachments
+                                    attachments={attachments}
+                                    alignment="start"
+                                    variant="promptCard"
                                   />
-                                ) : restoredMessageIds.has(codeInfo.id) ? (
-                                  "Restored"
-                                ) : (
-                                  <>
-                                    <FaUndo
-                                      className="flex-shrink-0"
-                                      size={10}
+                                </div>
+                              ) : null}
+                              {userDisplayText ? (
+                                <p
+                                  className={`break-words text-start text-xs font-normal leading-snug text-white/90 ${codeInfo?.id ? "pr-8" : ""}`}
+                                >
+                                  {userDisplayText}
+                                </p>
+                              ) : null}
+                              {codeInfo?.id ? (
+                                <button
+                                  type="button"
+                                  title={
+                                    restoredMessageIds.has(codeInfo.id)
+                                      ? "Restored"
+                                      : "Restore project to this point"
+                                  }
+                                  onClick={() =>
+                                    handleRestoreCode(codeInfo.id)
+                                  }
+                                  disabled={
+                                    restoringMessageId === codeInfo.id ||
+                                    restoredMessageIds.has(codeInfo.id)
+                                  }
+                                  className="absolute bottom-2 right-2 z-[2] rounded-md p-0.5 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  {restoringMessageId === codeInfo.id ? (
+                                    <LuLoaderCircle
+                                      className="h-3 w-3 shrink-0 animate-spin"
+                                      strokeWidth={2.25}
                                     />
-                                    Restore
-                                  </>
-                                )}
-                              </button>
+                                  ) : restoredMessageIds.has(codeInfo.id) ? (
+                                    <LuCheck
+                                      className="h-3 w-3 shrink-0 text-zinc-500"
+                                      strokeWidth={2.25}
+                                    />
+                                  ) : (
+                                    <LuCornerUpLeft
+                                      className="h-3 w-3 shrink-0"
+                                      strokeWidth={2.25}
+                                    />
+                                  )}
+                                </button>
+                              ) : null}
                             </div>
-                          );
-                        })()}
+                          )}
+                          <div
+                            className="h-px w-full bg-[#2a2a2d]"
+                            aria-hidden
+                          />
+                        </div>
                       </div>
                     </div>
                   );
@@ -1537,10 +1819,29 @@ const Messages = () => {
                     superblocksLeadIdx !== undefined &&
                     originalIndex === superblocksLeadIdx;
 
+                  /**
+                   * Do not emit an empty assistant wrapper: parent uses space-y-3, so phantom rows
+                   * (raw content exists but strips to nothing, no chips/files) still counted as
+                   * children and added large gaps during streaming.
+                   */
+                  const hasVisibleAssistantUI =
+                    showSuperblocksLabel ||
+                    turnBannerMs != null ||
+                    showMarkdownBlock ||
+                    (showGroupedFileWrites &&
+                      !!groupedFw &&
+                      groupedFw.length > 0) ||
+                    (showTasksCardInsideRow && displayTodosInline.length > 0) ||
+                    hasGeneratedImage ||
+                    renderableAttachments.length > 0;
+
+                  if (!hasVisibleAssistantUI) {
+                    return null;
+                  }
+
                   return (
                     <div
-                      key={msg.id || originalIndex}
-                      className="w-full min-w-0 justify-start flex flex-col items-stretch gap-2"
+                      className="relative z-0 w-full min-w-0 justify-start flex flex-col items-stretch gap-2"
                     >
                       <div className="flex w-full min-w-0 flex-col items-stretch gap-2 max-w-full">
                         {showSuperblocksLabel && (
@@ -1778,142 +2079,209 @@ const Messages = () => {
                     </div>
                   );
                 }
-              })}
-              {showLiveTasksPanel && (
-                <div
-                  key={`live-task-panel-${chatId || "session"}`}
-                  className="w-full justify-start flex flex-col items-start gap-2"
-                >
-                  <div className="w-full border border-[#262626] rounded-lg px-3 py-2 bg-zinc-950/50 max-w-[85%]">
-                    <p className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1.5">
-                      Tasks ·{" "}
-                      {
-                        reduxTodos.filter((t) => t.status !== "completed")
-                          .length
-                      }{" "}
-                      active · {reduxTodos.length} total
-                    </p>
-                    <ul className="space-y-1 max-h-48 overflow-y-auto text-xs text-zinc-300">
-                      {reduxTodos.map((t) => (
-                        <li key={t.id} className="flex items-start gap-2">
-                          <span className="text-zinc-500 shrink-0 w-3">
-                            {t.status === "completed"
-                              ? "✓"
-                              : t.status === "in_progress"
-                                ? "…"
-                                : "○"}
-                          </span>
-                          <span
-                            className={
-                              t.status === "completed"
-                                ? "line-through text-zinc-500"
-                                : ""
-                            }
-                          >
-                            {t.content}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              )}
-              {/* Single shimmer component - shows only one shimmer at a time */}
-              {(() => {
-                const activeShimmer = getActiveShimmer();
-                if (!activeShimmer) return null;
+              };
 
-                const lastMessage = messages?.[messages.length - 1];
-                const lastTool = lastMessage?.toolResult?.UsedTool;
-
-                // Get additional info for specific tools
-                const getAdditionalInfo = () => {
-                  if (lastTool === "webfetch") {
-                    return (lastMessage?.toolResult?.result as any)?.url
-                      ? `${(lastMessage?.toolResult?.result as any)?.url}`
-                      : null;
-                  }
-                  if (lastTool === "code_read") {
-                    return (lastMessage?.toolResult?.result as any)?.name
-                      ? `${(lastMessage?.toolResult?.result as any)?.name}`
-                      : null;
-                  }
-                  if (
-                    lastTool === "WebScreenShotAndReadWebsiteTool" ||
-                    (lastMessage as any).usedTool ===
-                      "WebScreenShotAndReadWebsiteTool"
-                  ) {
-                    const toolUrl =
-                      (lastMessage?.toolResult?.result as any)?.toolUrl ||
-                      (lastMessage as any).toolUrl ||
-                      (lastMessage?.toolResult as any)?.toolUrl;
-                    return toolUrl ? toolUrl : null;
-                  }
-                  return null;
-                };
-
-                const additionalInfo = getAdditionalInfo();
-
-                return (
-                  <div className="w-full justify-start flex flex-col items-start gap-2">
-                    <div className="flex justify-center items-start flex-col gap-2 max-w-[80%]">
-                      {activeShimmer.showHeader && (
-                        <p
-                          className={`font-sans font-medium text-xs text-gray-400`}
-                        >
-                          Superblocks
+              const tailAfterRows = (
+                <>
+                  {showLiveTasksPanel && (
+                    <div
+                      key={`live-task-panel-${chatId || "session"}`}
+                      className="w-full justify-start flex flex-col items-start gap-2"
+                    >
+                      <div className="w-full border border-[#262626] rounded-lg px-3 py-2 bg-zinc-950/50 max-w-[85%]">
+                        <p className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1.5">
+                          Tasks ·{" "}
+                          {
+                            reduxTodos.filter((t) => t.status !== "completed")
+                              .length
+                          }{" "}
+                          active · {reduxTodos.length} total
                         </p>
-                      )}
-                      <div className="flex flex-col gap-1">
-                        <p
-                          className={`break-words text-start flex items-center text-white`}
-                        >
-                          <span className="animate-pulse">
-                            {activeShimmer.text}
-                          </span>
-                          {!activeShimmer.text && (
-                            <span className="inline-flex items-center ml-1">
-                              <span className={`animate-dot-1 text-white`}>
-                                .
+                        <ul className="space-y-1 max-h-48 overflow-y-auto text-xs text-zinc-300">
+                          {reduxTodos.map((t) => (
+                            <li key={t.id} className="flex items-start gap-2">
+                              <span className="text-zinc-500 shrink-0 w-3">
+                                {t.status === "completed"
+                                  ? "✓"
+                                  : t.status === "in_progress"
+                                    ? "…"
+                                    : "○"}
                               </span>
-                              <span className={`animate-dot-2 text-white`}>
-                                .
+                              <span
+                                className={
+                                  t.status === "completed"
+                                    ? "line-through text-zinc-500"
+                                    : ""
+                                }
+                              >
+                                {t.content}
                               </span>
-                              <span className={`animate-dot-3 text-white`}>
-                                .
-                              </span>
-                            </span>
-                          )}
-                        </p>
-                        {additionalInfo && (
-                          <p className={`text-xs break-all text-gray-400`}>
-                            {lastTool === "webfetch" ||
-                            lastTool === "code_read" ? (
-                              <>
-                                {lastTool === "webfetch"
-                                  ? "Visiting: "
-                                  : "Reading: "}
-                                <span className="text-[#2C7BE1]">
-                                  {additionalInfo}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="text-[#2C7BE1]">
-                                {additionalInfo}
-                              </span>
-                            )}
-                          </p>
-                        )}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     </div>
-                  </div>
-                );
-              })()}
-              {/* Scroll anchor at bottom */}
-              <div ref={messagesEndRef} />
-            </>
-          );
-        }
+                  )}
+                  {(() => {
+                    const activeShimmer = getActiveShimmer();
+                    if (!activeShimmer) return null;
+
+                    const lastMessage = messages?.[messages.length - 1];
+                    const lastTool = lastMessage?.toolResult?.UsedTool;
+
+                    const getAdditionalInfo = () => {
+                      if (lastTool === "webfetch") {
+                        return (lastMessage?.toolResult?.result as any)?.url
+                          ? `${(lastMessage?.toolResult?.result as any)?.url}`
+                          : null;
+                      }
+                      if (lastTool === "code_read") {
+                        return (lastMessage?.toolResult?.result as any)?.name
+                          ? `${(lastMessage?.toolResult?.result as any)?.name}`
+                          : null;
+                      }
+                      if (
+                        lastTool === "WebScreenShotAndReadWebsiteTool" ||
+                        (lastMessage as any).usedTool ===
+                          "WebScreenShotAndReadWebsiteTool"
+                      ) {
+                        const toolUrl =
+                          (lastMessage?.toolResult?.result as any)?.toolUrl ||
+                          (lastMessage as any).toolUrl ||
+                          (lastMessage?.toolResult as any)?.toolUrl;
+                        return toolUrl ? toolUrl : null;
+                      }
+                      return null;
+                    };
+
+                    const additionalInfo = getAdditionalInfo();
+
+                    return (
+                      <div className="w-full justify-start flex flex-col items-start gap-2">
+                        <div className="flex justify-center items-start flex-col gap-2 max-w-[80%]">
+                          {activeShimmer.showHeader && (
+                            <p
+                              className={`font-sans font-medium text-xs text-gray-400`}
+                            >
+                              Superblocks
+                            </p>
+                          )}
+                          <div className="flex flex-col gap-1">
+                            <p
+                              className={`break-words text-start flex items-center text-white`}
+                            >
+                              <span className="animate-pulse">
+                                {activeShimmer.text}
+                              </span>
+                              {!activeShimmer.text && (
+                                <span className="inline-flex items-center ml-1">
+                                  <span className={`animate-dot-1 text-white`}>
+                                    .
+                                  </span>
+                                  <span className={`animate-dot-2 text-white`}>
+                                    .
+                                  </span>
+                                  <span className={`animate-dot-3 text-white`}>
+                                    .
+                                  </span>
+                                </span>
+                              )}
+                            </p>
+                            {additionalInfo && (
+                              <p className={`text-xs break-all text-gray-400`}>
+                                {lastTool === "webfetch" ||
+                                lastTool === "code_read" ? (
+                                  <>
+                                    {lastTool === "webfetch"
+                                      ? "Visiting: "
+                                      : "Reading: "}
+                                    <span className="text-[#2C7BE1]">
+                                      {additionalInfo}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <span className="text-[#2C7BE1]">
+                                    {additionalInfo}
+                                  </span>
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <div ref={messagesEndRef} />
+                </>
+              );
+
+              const firstUserIdx = messages.findIndex((m) => m.role === "user");
+              const leadingAssistantIndices: number[] = [];
+              if (firstUserIdx === -1) {
+                for (let li = 0; li < messages.length; li++) {
+                  leadingAssistantIndices.push(li);
+                }
+              } else {
+                for (let li = 0; li < firstUserIdx; li++) {
+                  leadingAssistantIndices.push(li);
+                }
+              }
+
+              type ChatTurn = { userIndex: number; assistantIndices: number[] };
+              const chatTurns: ChatTurn[] = [];
+              let pi = firstUserIdx === -1 ? messages.length : firstUserIdx;
+              while (pi < messages.length) {
+                if (messages[pi].role !== "user") {
+                  pi++;
+                  continue;
+                }
+                const userIndex = pi;
+                pi++;
+                const assistantIndices: number[] = [];
+                while (pi < messages.length && messages[pi].role !== "user") {
+                  assistantIndices.push(pi);
+                  pi++;
+                }
+                chatTurns.push({ userIndex, assistantIndices });
+              }
+
+              return (
+                <>
+                  {leadingAssistantIndices.map((i) => (
+                    <Fragment key={String(messages[i]?.id ?? `lead-${i}`)}>
+                      {renderChatRow(i)}
+                    </Fragment>
+                  ))}
+                  {chatTurns.map((t, turnIdx) => (
+                    <div
+                      key={String(
+                        messages[t.userIndex]?.id ?? `turn-${t.userIndex}`,
+                      )}
+                      className="relative isolate flex flex-col gap-2"
+                    >
+                      <div
+                        className="sticky top-0 w-full bg-[#0F0F0F]"
+                        style={{
+                          zIndex: 10 + (chatTurns.length - turnIdx),
+                        }}
+                      >
+                        {renderChatRow(t.userIndex)}
+                      </div>
+                      <div className="relative z-0 flex flex-col gap-1.5">
+                        {t.assistantIndices.map((ai) => (
+                          <Fragment
+                            key={String(messages[ai]?.id ?? `asst-${ai}`)}
+                          >
+                            {renderChatRow(ai)}
+                          </Fragment>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {tailAfterRows}
+                </>
+              );
+            }
 
         // If we only have tool messages, show shimmer using getActiveShimmer
         if (
@@ -1943,6 +2311,7 @@ const Messages = () => {
 
         return null;
       })()}
+      </div>
       {/* Show loading only when initial loading is true OR when loading messages with no content */}
       {isInitialLoading || messagesLoading ? (
         <div
