@@ -28,6 +28,7 @@ import { RxLightningBolt } from "react-icons/rx";
 import { Meteors } from "@/components/magicui/meteors";
 import { useCreateResponse } from "@/app/_services/useCreateResponse";
 import { useSettings } from "@/app/helpers/useSettings";
+import { SB_COMPOSER_PREFILL } from "@/app/helpers/previewRuntimeErrorEvents";
 
 // Add this type definition to match AttachmentPreview.tsx
 type AttachmentType = {
@@ -95,6 +96,7 @@ const Keyboard: NextPage = () => {
       sessionStorage.setItem("model", selectedModel);
     }
   }, [selectedModel]);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -275,22 +277,19 @@ const Keyboard: NextPage = () => {
     return id;
   }, [path]);
 
-  const sendAgentMessage = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-
-      if (isStreamActive) return;
-      if (!message.trim()) return;
+  const submitAgentRequest = useCallback(
+    async (inputRaw: string, attach: AttachmentType[]) => {
+      const input = inputRaw.trim();
+      if (isStreamActive || !input) return;
 
       try {
         setAttachments([]);
-
         setMessage("");
         const projectId = getProjectId();
 
         await createSecondaryResponse({
-          input: message,
-          attachments: attachments,
+          input,
+          attachments: attach,
           projectId,
           email: email.value as string,
           chatId: chatId || undefined,
@@ -312,19 +311,45 @@ const Keyboard: NextPage = () => {
       }
     },
     [
-      message,
-      dispatch,
       getProjectId,
       createSecondaryResponse,
       email.value,
       chatId,
       selectedModel,
-      attachments,
       selectedBlock,
       previewRuntime,
       isStreamActive,
-    ]
+    ],
   );
+
+  const sendAgentMessage = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!message.trim()) return;
+      await submitAgentRequest(message, attachments);
+    },
+    [message, attachments, submitAgentRequest],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPrefill = (event: Event) => {
+      const e = event as CustomEvent<{
+        text?: string;
+        autoSubmit?: boolean;
+      }>;
+      const text = typeof e.detail?.text === "string" ? e.detail.text : "";
+      if (!text.trim()) return;
+      if (e.detail?.autoSubmit) {
+        void submitAgentRequest(text, []);
+      } else {
+        setMessage(text);
+        requestAnimationFrame(() => textareaRef.current?.focus());
+      }
+    };
+    window.addEventListener(SB_COMPOSER_PREFILL, onPrefill);
+    return () => window.removeEventListener(SB_COMPOSER_PREFILL, onPrefill);
+  }, [submitAgentRequest]);
 
   const adjustTextareaHeight = () => {
     if (textareaRef.current) {

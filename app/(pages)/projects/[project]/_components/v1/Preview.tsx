@@ -48,6 +48,11 @@ import {
   normalizePagePath as normalizePagePathHelper,
 } from "@/app/helpers/sitePages";
 import { isCodeProjectData } from "@/app/helpers/projectKind";
+import PreviewRuntimeErrorBar from "./PreviewRuntimeErrorBar";
+import {
+  dispatchPreviewRuntimeError,
+  superblocksErrorsPayloadToDetail,
+} from "@/app/helpers/previewRuntimeErrorEvents";
 
 type TemplateBlock = {
   id: string;
@@ -290,6 +295,7 @@ const Preview = () => {
     showPreviewPageBar,
     selectedBlock: selectedBlockFromStore,
     previewUrl,
+    previewRuntime,
   } = useSelector((state: RootState) => state.projectOptions);
   const { files: projectFiles, currentFile, data: projectData, fetchedData: fetchedProjectData } = useSelector(
     (state: RootState) => state.projectFiles
@@ -325,6 +331,18 @@ const Preview = () => {
     setSitePanelOpen(false);
     setEmbedPanelOpen(false);
   }, [showPreviewPageBar]);
+
+  useEffect(() => {
+    if (!previewUrl || previewRuntime !== "web") return;
+    const onMessage = (event: MessageEvent) => {
+      const win = iframeRef.current?.contentWindow;
+      if (!win || event.source !== win) return;
+      const detail = superblocksErrorsPayloadToDetail(event.data);
+      if (detail) dispatchPreviewRuntimeError(detail);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [previewUrl, previewRuntime, iframeKey]);
 
   const splitEmbeds = useCallback((value: string) => {
     return (value || "")
@@ -1528,6 +1546,9 @@ Update the React components NOW to preserve all formatting.`;
           <div className={`h-full w-full flex justify-center relative ${responsive === "mobile" ? "items-center bg-[#0a0a0b]" : ""}`}
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
             onDrop={handleDrop}>
+            <PreviewRuntimeErrorBar
+              enabled={previewRuntime === "web" && Boolean(previewUrl)}
+            />
             {isDraggingBlock && (
               <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#4a90e2]/10 border-4 border-dashed border-[#4a90e2] m-4 rounded-2xl pointer-events-none">
                 <div className="bg-[#4a90e2] text-white px-8 py-3 rounded-full font-bold shadow-2xl scale-110">

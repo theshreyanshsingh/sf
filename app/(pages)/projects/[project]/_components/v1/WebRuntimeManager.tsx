@@ -12,6 +12,7 @@ import {
   onServerReady,
   syncFiles,
 } from "@/app/helpers/webcontainer";
+import { WEB_DEV_SERVER_SHELL_COMMAND } from "@/app/helpers/webContainerDevServerCommand";
 
 const FALLBACK_BOOTSTRAP_TIMEOUT_MS = 8000;
 
@@ -157,13 +158,7 @@ const WebRuntimeManager = () => {
           await new Promise((resolve) => window.setTimeout(resolve, 250));
         }
 
-        await writeToPrimaryTerminal(
-          "echo 'legacy-peer-deps=true' > ~/.npmrc && " +
-            "echo 'fetch-retry-mintimeout=20000' >> ~/.npmrc && " +
-            "echo 'fetch-retry-maxtimeout=120000' >> ~/.npmrc && " +
-            "npm install --legacy-peer-deps --prefer-offline --no-update-notifier && " +
-            "npm run dev\n",
-        );
+        await writeToPrimaryTerminal(WEB_DEV_SERVER_SHELL_COMMAND);
       })();
 
       const nextSequencePromise = nextSequence
@@ -244,6 +239,31 @@ const WebRuntimeManager = () => {
       );
     };
   }, [previewRuntime]);
+
+  useEffect(() => {
+    if (previewRuntime !== "web") return;
+
+    const onManualStartServer = () => {
+      void (async () => {
+        try {
+          if (startSequenceRef.current) {
+            await startSequenceRef.current.catch(() => undefined);
+          }
+          serverRequestedRef.current = true;
+          runtimeSourceRef.current = "project";
+          await writeToPrimaryTerminal("\u0003");
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          await writeToPrimaryTerminal(WEB_DEV_SERVER_SHELL_COMMAND);
+        } catch (error) {
+          console.warn("[web-runtime] Start server (manual) failed:", error);
+        }
+      })();
+    };
+
+    window.addEventListener("SB_START_WEB_DEV_SERVER", onManualStartServer);
+    return () =>
+      window.removeEventListener("SB_START_WEB_DEV_SERVER", onManualStartServer);
+  }, [previewRuntime, writeToPrimaryTerminal]);
 
   useEffect(() => {
     if (previewRuntime !== "web") return;

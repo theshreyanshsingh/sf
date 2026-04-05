@@ -1,7 +1,7 @@
 "use client";
 import { NextPage } from "next";
 import React, { useState } from "react";
-import { RiRefreshLine } from "react-icons/ri";
+import { RiPlayCircleLine, RiRefreshLine, RiRestartLine } from "react-icons/ri";
 
 import { CiMobile1, CiLaptop } from "react-icons/ci";
 
@@ -38,6 +38,11 @@ const SubHeader: NextPage = () => {
   const isMobilePreviewRuntime = previewRuntime === "mobile";
 
   const isPreviewReady = !!previewUrl;
+  /** Same gates as Inspector/Edit: no live preview URL yet (e.g. “Agent is cooking!”) or active stream. */
+  const previewChromeLocked = !isPreviewReady || !!isStreamActive;
+  /** WebContainer reported `server-ready` — dev server is listening at `previewUrl`. */
+  const isWebDevServerRunning =
+    !isMobilePreviewRuntime && Boolean(previewUrl?.trim());
 
   const reduxDispatch = useDispatch();
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -136,20 +141,22 @@ const SubHeader: NextPage = () => {
             onClick={() =>
               reduxDispatch(setShowPreviewPageBar(!showPreviewPageBar))
             }
-            disabled={!!isStreamActive}
-            className={`flex items-center cursor-pointer text-xs gap-1 justify-center transition-colors ${
-              isStreamActive
-                ? "text-gray-500 cursor-not-allowed"
+            disabled={previewChromeLocked}
+            className={`flex items-center text-xs gap-1 justify-center transition-colors ${
+              previewChromeLocked
+                ? "cursor-not-allowed text-gray-500"
                 : showPreviewPageBar
-                ? "text-[#4a90e2]"
-                : "text-white hover:text-gray-300"
+                  ? "cursor-pointer text-[#4a90e2]"
+                  : "cursor-pointer text-white hover:text-gray-300"
             }`}
             title={
-              isStreamActive
-                ? "Navigator becomes available after streaming finishes"
-                : showPreviewPageBar
-                  ? "Hide navigator"
-                  : "Show navigator"
+              !isPreviewReady
+                ? "Wait for live preview to load"
+                : isStreamActive
+                  ? "Navigator becomes available after streaming finishes"
+                  : showPreviewPageBar
+                    ? "Hide navigator"
+                    : "Show navigator"
             }
             type="button"
           >
@@ -158,6 +165,42 @@ const SubHeader: NextPage = () => {
         )}
         {!isMobilePreviewRuntime && (
           <button
+            type="button"
+            disabled={previewChromeLocked}
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(new CustomEvent("SB_START_WEB_DEV_SERVER"));
+              }
+            }}
+            className={`flex items-center text-xs gap-1 justify-center transition-colors ${
+              previewChromeLocked
+                ? "cursor-not-allowed text-gray-500"
+                : isWebDevServerRunning
+                  ? "cursor-pointer text-[#67C881] hover:text-[#7ad892]"
+                  : "cursor-pointer text-white hover:text-gray-300"
+            }`}
+            title={
+              !isPreviewReady
+                ? "Wait for live preview to load"
+                : isStreamActive
+                  ? "Available after streaming finishes"
+                  : isWebDevServerRunning
+                    ? "Dev server is running (preview is live). Click to interrupt and run npm install + npm run dev again in the Console."
+                    : "No dev server URL yet. Runs Ctrl+C, then npm install and npm run dev in the Console terminal."
+            }
+          >
+            {isWebDevServerRunning ? (
+              <RiRestartLine className="text-sm" />
+            ) : (
+              <RiPlayCircleLine className="text-sm" />
+            )}
+            {isWebDevServerRunning ? "Restart server" : "Start server"}
+          </button>
+        )}
+        {!isMobilePreviewRuntime && (
+          <button
+            type="button"
+            disabled={previewChromeLocked}
             onClick={() => {
               if (responsive === "desktop") {
                 reduxDispatch(setResponsivess({ responsive: "mobile" }));
@@ -165,8 +208,20 @@ const SubHeader: NextPage = () => {
                 reduxDispatch(setResponsivess({ responsive: "desktop" }));
               }
             }}
-            className="flex items-center cursor-pointer text-white text-xs gap-1 justify-center"
-            type="button"
+            className={`flex items-center text-xs gap-1 justify-center transition-colors ${
+              previewChromeLocked
+                ? "cursor-not-allowed text-gray-500"
+                : "cursor-pointer text-white hover:text-gray-300"
+            }`}
+            title={
+              !isPreviewReady
+                ? "Wait for live preview to load"
+                : isStreamActive
+                  ? "Available after streaming finishes"
+                  : responsive === "mobile"
+                    ? "Switch to desktop frame"
+                    : "Switch to mobile frame"
+            }
           >
             {responsive === "mobile" ? (
               <CiLaptop className="text-md" />

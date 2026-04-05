@@ -11,6 +11,27 @@ import type {
 
 let instance: WebContainer | null = null;
 let booting: Promise<WebContainer> | null = null;
+let previewForwardingAttached = false;
+
+async function attachPreviewForwardingIfNeeded(wc: WebContainer): Promise<void> {
+  if (typeof window === "undefined" || previewForwardingAttached) return;
+  previewForwardingAttached = true;
+  const {
+    dispatchPreviewRuntimeError,
+    previewMessageToDetail,
+  } = await import("@/app/helpers/previewRuntimeErrorEvents");
+  wc.on("preview-message", (msg) => {
+    dispatchPreviewRuntimeError(previewMessageToDetail(msg));
+  });
+  wc.on("error", (err) => {
+    dispatchPreviewRuntimeError({
+      id: `wc-int-${Date.now()}`,
+      source: "webcontainer-internal",
+      title: "WebContainer error",
+      body: err.message || "Unknown internal error",
+    });
+  });
+}
 
 const normalizeProjectPath = (path: string): string =>
   (path || "")
@@ -19,14 +40,18 @@ const normalizeProjectPath = (path: string): string =>
     .replace(/^workspace\//, "");
 
 export async function boot(): Promise<WebContainer> {
-  if (instance) return instance;
+  if (instance) {
+    await attachPreviewForwardingIfNeeded(instance);
+    return instance;
+  }
   if (booting) return booting;
 
   booting = (async () => {
     try {
       const { WebContainer: WC } = await import("@webcontainer/api");
-      const wc = await WC.boot();
+      const wc = await WC.boot({ forwardPreviewErrors: true });
       instance = wc;
+      await attachPreviewForwardingIfNeeded(wc);
       return wc;
     } catch (err) {
       booting = null;
