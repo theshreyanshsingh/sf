@@ -15,6 +15,7 @@ import {
   Fragment,
   useState,
   useEffect,
+  useLayoutEffect,
   useRef,
   useCallback,
   type ReactNode,
@@ -80,6 +81,88 @@ const CollapsibleImage = ({ src, alt }: { src: string; alt?: string }) => {
     </div>
   );
 };
+
+/** ~5–6 lines of `text-xs` / `leading-snug`; expand on click when content exceeds this. */
+const USER_PROMPT_COLLAPSED_MAX_PX = 100;
+
+function CollapsibleUserPromptText({
+  text,
+  reserveRightForRestore,
+}: {
+  text: string;
+  reserveRightForRestore: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [needsCollapse, setNeedsCollapse] = useState(false);
+  const pRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [text]);
+
+  useLayoutEffect(() => {
+    if (!text.trim()) {
+      setNeedsCollapse(false);
+      return;
+    }
+    const p = pRef.current;
+    if (!p) return;
+    setNeedsCollapse(p.scrollHeight > USER_PROMPT_COLLAPSED_MAX_PX);
+  }, [text]);
+
+  const padRight = reserveRightForRestore ? "pr-8" : "";
+  const basePClass = `break-words text-start text-xs font-normal leading-snug text-white/90 ${padRight}`;
+
+  if (!needsCollapse) {
+    return (
+      <p ref={pRef} className={basePClass}>
+        {text}
+      </p>
+    );
+  }
+
+  return (
+    <motion.div
+      className="group relative cursor-pointer"
+      initial={false}
+      animate={{
+        maxHeight: expanded ? 4000 : USER_PROMPT_COLLAPSED_MAX_PX,
+      }}
+      transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
+      style={{ overflow: "hidden" }}
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      aria-label={expanded ? "Collapse prompt" : "Expand prompt"}
+      onClick={() => setExpanded((v) => !v)}
+      onKeyDown={(ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          setExpanded((v) => !v);
+        }
+      }}
+    >
+      <p
+        ref={pRef}
+        className={`${basePClass} ${expanded ? "pb-1" : "pb-5"}`}
+      >
+        {text}
+      </p>
+      <div
+        className={`pointer-events-none absolute bottom-1 z-[1] opacity-0 transition-opacity duration-150 group-hover:opacity-100 ${
+          reserveRightForRestore ? "right-10" : "right-1"
+        }`}
+        aria-hidden
+      >
+        {expanded ? (
+          <FaChevronUp className="h-3 w-3 text-white/45" />
+        ) : (
+          <FaChevronDown className="h-3 w-3 text-white/45" />
+        )}
+      </div>
+    </motion.div>
+  );
+}
 
 type FileWriteEntry = { path: string; content: string; kind?: FileWriteKind };
 
@@ -1711,11 +1794,10 @@ const Messages = () => {
                                 </div>
                               ) : null}
                               {userDisplayText ? (
-                                <p
-                                  className={`break-words text-start text-xs font-normal leading-snug text-white/90 ${codeInfo?.id ? "pr-8" : ""}`}
-                                >
-                                  {userDisplayText}
-                                </p>
+                                <CollapsibleUserPromptText
+                                  text={userDisplayText}
+                                  reserveRightForRestore={!!codeInfo?.id}
+                                />
                               ) : null}
                               {codeInfo?.id ? (
                                 <button
