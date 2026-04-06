@@ -47,10 +47,6 @@ const TiptapEditor = ({ content, onChange }: TiptapEditorProps) => {
         },
     });
 
-    if (!editor) {
-        return null;
-    }
-
     useEffect(() => {
         if (!editor) return;
         const current = editor.getHTML();
@@ -58,6 +54,10 @@ const TiptapEditor = ({ content, onChange }: TiptapEditorProps) => {
             editor.commands.setContent(content, { emitUpdate: false });
         }
     }, [content, editor]);
+
+    if (!editor) {
+        return null;
+    }
 
     return (
         <div className="flex flex-col h-full bg-[#141415]  border border-[#2a2a2b] rounded-lg overflow-hidden">

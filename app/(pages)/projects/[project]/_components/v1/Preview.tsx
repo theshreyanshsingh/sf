@@ -301,6 +301,19 @@ const Preview = () => {
     (state: RootState) => state.projectFiles
   );
 
+  // Hydration stores a baseline in `fetchedData`; live edits and restore write `data`.
+  // Using `fetched || data` ignored `data` whenever `fetchedData` was set, so restore
+  // and other Redux updates never affected preview logic that read this merge.
+  const mergedProjectData = useMemo(() => {
+    const fromFetch = fetchedProjectData;
+    const live = projectData;
+    if (!fromFetch && !live) return null;
+    return {
+      ...(fromFetch || {}),
+      ...(live || {}),
+    } as Record<string, string>;
+  }, [fetchedProjectData, projectData]);
+
   const path = usePathname();
   const projectId = useMemo(() => {
     const segments = path.split("/");
@@ -315,8 +328,13 @@ const Preview = () => {
   );
 
   const ensureUniquePagePath = useCallback(
-    (path: string) => ensureUniquePagePathHelper(path, siteGraph?.pages || []),
-    [siteGraph]
+    (path: string) =>
+      ensureUniquePagePathHelper(
+        path,
+        siteGraph?.pages || [],
+        mergedProjectData,
+      ),
+    [siteGraph, mergedProjectData],
   );
 
   const previewSrc = useMemo(() => {
@@ -473,10 +491,11 @@ const Preview = () => {
   );
 
   const createBasicPageHtml = useCallback(
-    (title: string, slug: string) => {
+    (title: string, slug: string, filePath?: string) => {
       const html = createBasicPageTemplate({
         title,
         slug,
+        filePath,
         embeds: getEmbedState(),
       });
       return applyEmbedsToHtml(html);
@@ -484,7 +503,7 @@ const Preview = () => {
     [applyEmbedsToHtml, getEmbedState]
   );
 
-  const projectDataForKind = fetchedProjectData || projectData;
+  const projectDataForKind = mergedProjectData;
   const isCodeProject = useMemo(
     () => isCodeProjectData(projectDataForKind),
     [projectDataForKind]
@@ -963,7 +982,7 @@ Update the React components NOW to preserve all formatting.`;
         .split(/[-_]/)
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join(" ");
-      const html = createBasicPageHtml(title, slug);
+      const html = createBasicPageHtml(title, slug, safeTarget);
       if (!html || !html.trim()) {
         console.warn("[Preview] Basic page fallback is disabled.");
         return;
@@ -1503,6 +1522,7 @@ Update the React components NOW to preserve all formatting.`;
               />
             </div>
             <button
+              type="button"
               onClick={handleApplyBlockChanges}
               className="inline-flex items-center justify-center gap-2 rounded-md bg-[#4a90e2] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#5ba0f2]"
             >

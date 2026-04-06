@@ -18,6 +18,20 @@
   let mediumEditorInstance = null;
   let mediumEditorLoading = null;
 
+  function queryBlockElementById(blockId) {
+    if (!blockId) return null;
+    try {
+      if (typeof CSS !== 'undefined' && CSS.escape) {
+        return document.querySelector(
+          '[data-sb-block-id="' + CSS.escape(blockId) + '"]'
+        );
+      }
+    } catch (e) {
+      /* fall through */
+    }
+    return document.querySelector('[data-sb-block-id="' + blockId + '"]');
+  }
+
   const MEDIUM_EDITOR_ASSETS = {
     js: "https://cdn.jsdelivr.net/npm/medium-editor@5.23.3/dist/js/medium-editor.min.js",
     css: [
@@ -748,7 +762,7 @@
 
   function clearBlockSelection() {
     if (selectedBlockId) {
-      const prev = document.querySelector(`[data-sb-block-id="${selectedBlockId}"]`);
+      const prev = queryBlockElementById(selectedBlockId);
       if (prev) prev.classList.remove('wysiwyg-block-selected');
     }
   }
@@ -783,7 +797,13 @@
     if (!blockEl) return;
     const blockId = ensureBlockId(blockEl);
     if (!blockId) return;
-    if (blockId === selectedBlockId) return;
+    // Same block id after DOM replace (e.g. Apply): re-attach selection chrome without re-posting to parent.
+    if (blockId === selectedBlockId) {
+      clearBlockSelection();
+      selectedBlockId = blockId;
+      blockEl.classList.add('wysiwyg-block-selected');
+      return;
+    }
 
     clearBlockSelection();
     selectedBlockId = blockId;
@@ -1495,7 +1515,7 @@
     if (event.data && event.data.type === 'WYSIWYG_UPDATE_BLOCK') {
       const { blockId, html } = event.data.payload || {};
       if (!blockId || !html) return;
-      const existing = document.querySelector(`[data-sb-block-id="${blockId}"]`);
+      const existing = queryBlockElementById(blockId);
       if (!existing) return;
 
       const temp = document.createElement('div');

@@ -434,10 +434,10 @@ const Sheet: NextPage = () => {
 
                 {/* Pages Manager */}
                 <motion.div
-                  className="h-full w-full"
+                  className="flex h-full min-h-0 w-full flex-col overflow-hidden"
                   animate={{
                     opacity: mode === "pages" ? 1 : 0,
-                    display: mode === "pages" ? "block" : "none",
+                    display: mode === "pages" ? "flex" : "none",
                   }}
                   initial={false}
                   transition={{ duration: 0.1 }}

@@ -3,6 +3,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
 import { boot, getContainer, onServerReady } from "@/app/helpers/webcontainer";
+import {
+  ingestPrimaryTerminalOutputChunk,
+  resetViteTerminalErrorBuffer,
+} from "@/app/helpers/forwardViteTerminalErrors";
 import { useDispatch } from "react-redux";
 import { setPreviewUrl } from "@/app/redux/reducers/projectOptions";
 import { IoClose } from "react-icons/io5";
@@ -184,6 +188,9 @@ const Terminal = () => {
             term.write(value);
             outputBuf.current[id] += value;
             outputCbs.current[id]?.forEach((cb) => cb(value));
+            if (id === "terminal-1") {
+              ingestPrimaryTerminalOutputChunk(value);
+            }
           }
         }
       } catch { /* stream closed */ }
@@ -220,6 +227,7 @@ const Terminal = () => {
     initedRef.current.delete(id);
     outputBuf.current[id] = "";
     outputCbs.current[id] = [];
+    resetViteTerminalErrorBuffer();
     await initTab(id);
   }, [initTab]);
 

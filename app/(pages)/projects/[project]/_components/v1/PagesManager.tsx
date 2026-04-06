@@ -14,6 +14,7 @@ import type { RootState } from "@/app/redux/store";
 import {
   createBasicPageHtml,
   ensureUniquePagePath,
+  inferPageRootFromProjectFiles,
   normalizePagePath,
   SiteGraph as SiteGraphBase,
 } from "@/app/helpers/sitePages";
@@ -202,9 +203,24 @@ const PagesManager = () => {
 
   const handleCreatePage = useCallback(
     async (rawPath?: string) => {
-      if (!siteGraph) return;
-      const target = normalizePagePath(rawPath || pageInput, siteGraph);
-      const safeTarget = ensureUniquePagePath(target, siteGraph.pages || []);
+      const graphForPaths: SiteGraph =
+        siteGraph ??
+        ({
+          pages: [],
+          links: [],
+          orphanedLinks: [],
+          orphanedPages: [],
+          embeds: { head: [], body: [] },
+          forms: [],
+          pageRoot: inferPageRootFromProjectFiles(projectData),
+        } as SiteGraph);
+
+      const target = normalizePagePath(rawPath || pageInput, graphForPaths);
+      const safeTarget = ensureUniquePagePath(
+        target,
+        graphForPaths.pages || [],
+        projectData,
+      );
       const slug = safeTarget
         .replace(/^pages\//, "")
         .replace(/^workspace\//, "")
@@ -216,7 +232,8 @@ const PagesManager = () => {
       const html = createBasicPageHtml({
         title,
         slug,
-        embeds: siteGraph.embeds || { head: [], body: [] },
+        filePath: safeTarget,
+        embeds: graphForPaths.embeds || { head: [], body: [] },
       });
       if (!html || !html.trim()) {
         console.warn("[PagesManager] Basic page fallback is disabled.");
@@ -261,7 +278,16 @@ const PagesManager = () => {
         dispatch(setProjectMode({ mode: "edit" }));
       }
     },
-    [API, email.value, pageInput, projectId, siteGraph, webcontainerInstance, dispatch, fetchSiteGraph]
+    [
+      API,
+      email.value,
+      pageInput,
+      projectId,
+      siteGraph,
+      projectData,
+      dispatch,
+      fetchSiteGraph,
+    ]
   );
 
   const handleOpenPage = useCallback((path: string) => {
@@ -584,13 +610,20 @@ export default SBFormBlock;
 
       if (next.includes("<SBFormBlock")) return next;
 
-      const fragmentClose = next.lastIndexOf("</>");
-      if (fragmentClose !== -1) {
-        return (
-          next.slice(0, fragmentClose) +
-          `\n      <SBFormBlock />\n` +
-          next.slice(fragmentClose)
-        );
+      const fragReturn = /\breturn\s*\(\s*\n?\s*<>/;
+      if (fragReturn.test(next)) {
+        const retStart = next.search(fragReturn);
+        const openFrag = next.indexOf("<>", retStart);
+        if (openFrag !== -1) {
+          const closeFrag = next.indexOf("</>", openFrag + 2);
+          if (closeFrag !== -1) {
+            return (
+              next.slice(0, closeFrag) +
+              `\n      <SBFormBlock />\n` +
+              next.slice(closeFrag)
+            );
+          }
+        }
       }
 
       const rootMatch = next.match(/return\s*\(\s*<([A-Za-z][\w:-]*)/);
@@ -622,9 +655,16 @@ export default SBFormBlock;
   );
 
   const handleInsertForm = useCallback(async () => {
-    if (!selectedPage || !siteGraph) return;
+    if (!selectedPage) return;
+    const graphForNorm: SiteGraph =
+      siteGraph ??
+      ({
+        pages: [],
+        embeds: { head: [], body: [] },
+        pageRoot: inferPageRootFromProjectFiles(projectData),
+      } as SiteGraph);
     const html = buildFormHtml();
-    const targetPath = normalizePagePath(selectedPage, siteGraph);
+    const targetPath = normalizePagePath(selectedPage, graphForNorm);
 
     let existingHtml = "";
     if (projectData) {
@@ -652,7 +692,7 @@ export default SBFormBlock;
     }
 
     const reactApp = await resolveReactApp();
-    if (reactApp && targetPath.endsWith("index.html")) {
+    if (reactApp) {
       const { componentCode } = buildFormComponent();
       const componentExt = reactApp.isTsx ? "tsx" : "jsx";
       const componentPath = reactApp.appPath.replace(
@@ -841,8 +881,8 @@ export default SBFormBlock;
   };
 
   return (
-    <div className="h-full w-full p-6 overflow-y-auto text-white">
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden p-6 text-white">
+      <div className="mb-6 shrink-0 flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-lg font-semibold">Pages</h2>
@@ -864,8 +904,8 @@ export default SBFormBlock;
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <div className="xl:col-span-2 space-y-6">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 overflow-y-auto overflow-x-hidden pb-4 xl:grid-cols-3 xl:overflow-hidden">
+        <div className="min-h-0 space-y-6 xl:col-span-2 xl:overflow-y-auto xl:pr-1">
           <div className="rounded-xl border border-[#2a2a2b] bg-[#141415] p-4">
             <div className="flex flex-wrap items-center gap-3 mb-4">
               <input
@@ -875,6 +915,7 @@ export default SBFormBlock;
                 className="flex-1 min-w-[200px] rounded-lg border border-[#2a2a2b] bg-[#0f0f10] px-3 py-2 text-xs text-white"
               />
               <button
+                type="button"
                 onClick={() => handleCreatePage(pageInput)}
                 className="inline-flex items-center gap-1 rounded-md bg-[#4a90e2] px-3 py-2 text-xs font-semibold text-white hover:bg-[#5ba0f2]"
               >
@@ -994,18 +1035,21 @@ export default SBFormBlock;
           </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="rounded-xl border border-[#2a2a2b] bg-[#141415] p-4">
-            <h3 className="text-sm font-semibold mb-3">Form Builder</h3>
-            <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+        <div className="flex min-h-0 min-w-0 flex-col gap-6 xl:overflow-hidden">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#2a2a2b] bg-[#141415] p-4">
+            <h3 className="mb-3 shrink-0 text-sm font-semibold">Form Builder</h3>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden overscroll-y-contain pr-1 [scrollbar-gutter:stable]">
               <select
                 value={selectedPage}
                 onChange={(e) => setSelectedPage(e.target.value)}
-                className="w-full rounded-lg border border-[#2a2a2b] bg-[#0f0f10] px-3 py-2 text-xs"
+                className="w-full min-w-0 rounded-lg border border-[#2a2a2b] bg-[#0f0f10] px-3 py-2 text-xs"
               >
+                {(siteGraph?.pages || []).length === 0 ? (
+                  <option value="">No pages — create one first</option>
+                ) : null}
                 {(siteGraph?.pages || []).map((page) => (
                   <option key={page.path} value={page.path}>
-                    Insert into: {page.title || page.path}
+                    {page.title || page.path}
                   </option>
                 ))}
               </select>
@@ -1027,7 +1071,7 @@ export default SBFormBlock;
                 className="w-full min-h-[60px] rounded-lg border border-[#2a2a2b] bg-[#0f0f10] px-3 py-2 text-xs"
                 placeholder="Short description"
               />
-              <div className="grid grid-cols-2 gap-2 text-xs min-w-0">
+              <div className="grid min-w-0 grid-cols-2 gap-2 text-xs">
                 <label className="flex flex-col gap-1">
                   Accent
                   <input type="color" value={formAccent} onChange={(e) => setFormAccent(e.target.value)} className="h-8 w-full bg-transparent" />
@@ -1083,8 +1127,8 @@ export default SBFormBlock;
                     Add field
                   </button>
                 </div>
-                {fields.map((field, index) => (
-                  <div key={field.id} className="rounded-lg border border-[#2a2a2b] bg-[#111116] p-2 space-y-2">
+                {fields.map((field) => (
+                  <div key={field.id} className="min-w-0 space-y-2 rounded-lg border border-[#2a2a2b] bg-[#111116] p-2">
                     <div className="flex items-center justify-between text-[11px]">
                       <span>{field.label}</span>
                       <div className="flex items-center gap-1">
@@ -1140,15 +1184,17 @@ export default SBFormBlock;
                 ))}
               </div>
               <button
+                type="button"
+                disabled={!selectedPage || !(siteGraph?.pages || []).length}
                 onClick={handleInsertForm}
-                className="inline-flex items-center gap-2 rounded-md bg-[#4a90e2] px-3 py-2 text-xs font-semibold text-white hover:bg-[#5ba0f2]"
+                className="mt-1 inline-flex shrink-0 items-center gap-2 rounded-md bg-[#4a90e2] px-3 py-2 text-xs font-semibold text-white hover:bg-[#5ba0f2] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <MdOutlineOpenInNew /> Insert Form In Page
               </button>
             </div>
           </div>
 
-          <div className="rounded-xl border border-[#2a2a2b] bg-[#141415] p-4">
+          <div className="shrink-0 rounded-xl border border-[#2a2a2b] bg-[#141415] p-4">
             <h3 className="text-sm font-semibold mb-3">Detected Forms</h3>
             {(siteGraph?.forms || []).length === 0 && (
               <p className="text-xs text-[#7d7d84]">No forms detected yet.</p>
@@ -1169,7 +1215,9 @@ export default SBFormBlock;
       </div>
 
       {loading && (
-        <div className="mt-6 text-xs text-[#7d7d84]">Refreshing site graph…</div>
+        <div className="mt-4 shrink-0 text-xs text-[#7d7d84]">
+          Refreshing site graph…
+        </div>
       )}
     </div>
   );

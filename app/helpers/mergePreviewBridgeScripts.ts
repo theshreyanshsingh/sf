@@ -5,10 +5,38 @@
  */
 let wysiwygEditorSource: string | null = null;
 
+/**
+ * WebContainer dev preview runs in the Superblocks desktop/agent UI — hide the
+ * "Made by Superblocks" badge there. Production `vite build` (e.g. worker
+ * deploy) still uses the project's vite.config unchanged.
+ */
+function stripSuperblocksBadgePluginFromViteConfigs(
+  files: Record<string, string>,
+): void {
+  const keys = [
+    "vite.config.js",
+    "vite.config.ts",
+    "vite.config.mts",
+    "vite.config.mjs",
+  ];
+  for (const key of keys) {
+    const src = files[key];
+    if (typeof src !== "string" || !src.includes("SuperblocksBadgePlugin")) {
+      continue;
+    }
+    let next = src.replace(/\r\n/g, "\n");
+    next = next.replace(/\n[ \t]*SuperblocksBadgePlugin\(\)[ \t]*,?[ \t]*/g, "\n");
+    next = next.replace(/,\s*,(\s*\n)/g, ",$1");
+    next = next.replace(/\[\s*,/g, "[");
+    files[key] = next;
+  }
+}
+
 export async function mergePreviewBridgeScripts(
   files: Record<string, string>,
 ): Promise<Record<string, string>> {
   const out = { ...files };
+  stripSuperblocksBadgePluginFromViteConfigs(out);
 
   try {
     if (wysiwygEditorSource === null) {

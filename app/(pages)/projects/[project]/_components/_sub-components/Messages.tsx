@@ -37,12 +37,19 @@ import {
   dbMessageToUiMessage,
   syncTodosFromHydratedMessages,
 } from "@/app/_services/agentMessageNormalize";
-import { updateSpecificFile } from "@/app/redux/reducers/projectFiles";
-import { refreshPreview } from "@/app/redux/reducers/projectOptions";
+import {
+  clearAllFiles,
+  updateSpecificFile,
+  updateSpecificFilesBatch,
+} from "@/app/redux/reducers/projectFiles";
+import { refreshPreview, setStreamActive } from "@/app/redux/reducers/projectOptions";
 import { FaChevronDown, FaChevronUp } from "react-icons/fa";
 import { API } from "@/app/config/publicEnv";
 import { useGetChatMessages } from "@/app/_services/useChatOperations";
-import { extractFileWritesFromSnapshot } from "@/app/_services/fileUpdatesMobile";
+import {
+  dedupeFileWrites,
+  extractFileWritesFromSnapshot,
+} from "@/app/_services/fileUpdatesMobile";
 import { fetchProjectSnapshot } from "@/app/helpers/fetchProjectSnapshot";
 
 // Collapsible Image Component
@@ -1036,17 +1043,33 @@ const Messages = () => {
             userEmail: session.user.email,
             codeUrl: data.codeUrl,
           });
-          const fileWrites = extractFileWritesFromSnapshot(codeData);
+          const fileWrites = dedupeFileWrites(
+            extractFileWritesFromSnapshot(codeData),
+          );
 
-          for (const write of fileWrites) {
-            dispatch(
-              updateSpecificFile({
-                filePath: write.path,
-                content: write.content,
-                createDirectories: true,
-              }),
+          if (!fileWrites.length) {
+            console.error(
+              "[restore] Snapshot contained no extractable file writes",
+              { codeDataKeys: codeData && typeof codeData === "object" ? Object.keys(codeData as object) : [] },
             );
+            dispatch(setStreamActive(false));
+            dispatch(refreshPreview());
+            throw new Error("Restored snapshot had no files to apply.");
           }
+
+          // Replace local project state with the checkpoint (merge would leave stale paths).
+          dispatch(clearAllFiles());
+          dispatch(
+            updateSpecificFilesBatch(
+              fileWrites.map((w) => ({
+                filePath: w.path,
+                content: w.content,
+                createDirectories: true,
+              })),
+            ),
+          );
+
+          dispatch(setStreamActive(false));
 
           // Mark this message as successfully restored
           setRestoredMessageIds((prev) => new Set(prev).add(messageId));

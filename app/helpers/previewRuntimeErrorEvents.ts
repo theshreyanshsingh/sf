@@ -15,7 +15,9 @@ export const SB_COMPOSER_PREFILL = "SB_COMPOSER_PREFILL";
 export type PreviewRuntimeErrorSource =
   | "webcontainer-preview"
   | "webcontainer-internal"
-  | "preview-postmessage";
+  | "preview-postmessage"
+  /** Vite/esbuild output on the dev terminal (not forwarded as iframe console errors). */
+  | "vite-terminal";
 
 export type PreviewRuntimeErrorDetail = {
   id: string;
@@ -145,13 +147,25 @@ const ERROR_TYPE_LABELS: Record<string, string> = {
   unhandled_promise_rejection: "Unhandled rejection",
   vite_module_error: "Vite / module error",
   api_request_error: "API error",
+  build_time_error: "Vite build error",
 };
+
+/** Shipped agent templates (rules.json) historically used this typo in vite pre-boot plugins. */
+const SUPERBLOCKS_ERRORS_MESSAGE_TYPES = new Set([
+  "SUPERBLOCKS_ERRORS",
+  "Superblocks_ERRORS",
+]);
 
 /** Normalize `ErrorReporter` / SUPERBLOCKS postMessage payloads from the preview iframe. */
 export function superblocksErrorsPayloadToDetail(data: unknown): PreviewRuntimeErrorDetail | null {
   if (!data || typeof data !== "object") return null;
   const d = data as Record<string, unknown>;
-  if (d.type !== "SUPERBLOCKS_ERRORS") return null;
+  if (
+    typeof d.type !== "string" ||
+    !SUPERBLOCKS_ERRORS_MESSAGE_TYPES.has(d.type)
+  ) {
+    return null;
+  }
   const err = d.error as Record<string, unknown> | undefined;
   const errorType =
     typeof d.errorType === "string" ? d.errorType : "preview_error";

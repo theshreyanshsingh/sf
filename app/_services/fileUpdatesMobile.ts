@@ -831,6 +831,13 @@ export const extractFileWritesFromSnapshot = (
         seen,
       });
     }
+    if (isObject(snapshot.code)) {
+      collectSnapshotMapWrites({
+        mapValue: snapshot.code,
+        writes,
+        seen,
+      });
+    }
     if (Array.isArray(snapshot.initialCode)) {
       snapshot.initialCode.forEach((entry) => {
         const fileWrite = asFileWrite(entry);
