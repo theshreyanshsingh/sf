@@ -700,10 +700,12 @@ export const useCreateResponse = () => {
             resolveCodeUrlFromPayload(data) || latestMessageCodeUrl;
 
           const urlCandidate =
-            (typeof data?.url === "string" && data.url.trim()) ||
+            // Prefer effective snapshot URL (backend resolves restoredMessageId)
+            // over the project's canonical `url` (latest snapshot pointer).
             (typeof data?.codeUrl === "string" && data.codeUrl.trim()) ||
             (typeof data?.code_url === "string" && data.code_url.trim()) ||
             primaryCodeUrl ||
+            (typeof data?.url === "string" && data.url.trim()) ||
             null;
 
           const setUrlIfWeb = () => {

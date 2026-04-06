@@ -160,6 +160,12 @@ export const fetchProject = createAsyncThunk<
 
     sessionStorage.setItem("framework", data.framework);
 
+    const effectiveSnapshotUrl =
+      (typeof data?.codeUrl === "string" && data.codeUrl.trim()) ||
+      (typeof data?.code_url === "string" && data.code_url.trim()) ||
+      (typeof data?.url === "string" && data.url.trim()) ||
+      "";
+
     return {
       title: data.title,
       projectId: data.projectId,
@@ -167,7 +173,9 @@ export const fetchProject = createAsyncThunk<
       csslib: data.csslib,
       framework: data.framework,
       memory: data.memory,
-      url: data.url,
+      // `url` here is used by the web runtime hydration to fetch the snapshot JSON.
+      // Prefer effective `codeUrl` (restoredMessageId-aware) when present.
+      url: effectiveSnapshotUrl,
       lastResponder: data.lastResponder,
       isResponseCompleted: data.isResponseCompleted,
       enh_prompt: data.enh_prompt,

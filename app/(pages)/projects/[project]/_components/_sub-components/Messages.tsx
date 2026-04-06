@@ -42,7 +42,7 @@ import {
   updateSpecificFile,
   updateSpecificFilesBatch,
 } from "@/app/redux/reducers/projectFiles";
-import { refreshPreview, setStreamActive } from "@/app/redux/reducers/projectOptions";
+import { refreshPreview, setStreamActive, setUrl } from "@/app/redux/reducers/projectOptions";
 import { FaChevronDown, FaChevronUp } from "react-icons/fa";
 import { API } from "@/app/config/publicEnv";
 import { useGetChatMessages } from "@/app/_services/useChatOperations";
@@ -1038,6 +1038,9 @@ const Messages = () => {
       // If restore was successful, fetch and apply the code
       if (data.success && data.codeUrl) {
         try {
+          // Persist effective snapshot URL in Redux so refresh hydration uses restored checkpoint.
+          dispatch(setUrl(data.codeUrl));
+
           const codeData = await fetchProjectSnapshot({
             projectId: generatedName,
             userEmail: session.user.email,

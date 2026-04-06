@@ -620,25 +620,14 @@ export const useResponse = () => {
       const normalizedFiles = shouldNormalize
         ? normalizeWebProjectFiles(projectFiles).files
         : projectFiles;
-      const shouldAppendExisting =
-        !isStreamActive &&
-        !!projectFilesData &&
-        typeof projectFilesData === "object" &&
-        Object.keys(projectFilesData as Record<string, unknown>).length > 0;
-      const filesForStore = shouldAppendExisting
-        ? {
-            ...(projectFilesData as Record<string, any>),
-            ...normalizedFiles,
-          }
-        : normalizedFiles;
+      // Snapshot hydration should REPLACE local state, not merge.
+      // Merging keeps stale paths from newer snapshots and breaks restore semantics.
       debugWc("fetchProjectFiles normalized", {
         normalizedCount: Object.keys(normalizedFiles).length,
-        mergedCount: Object.keys(filesForStore).length,
-        appendExisting: shouldAppendExisting,
       });
 
-      dispatch(setprojectFiles(buildFileTree(filesForStore)));
-      dispatch(setprojectData(filesForStore));
+      dispatch(setprojectFiles(buildFileTree(normalizedFiles)));
+      dispatch(setprojectData(normalizedFiles));
       dispatch(bumpUrlLoadId());
 
       dispatch(setReaderMode(false));

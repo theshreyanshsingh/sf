@@ -10,6 +10,7 @@ import {
   boot,
   fetchAndMountTestFiles,
   onServerReady,
+  rm,
   syncFiles,
 } from "@/app/helpers/webcontainer";
 import { mergePreviewBridgeScripts } from "@/app/helpers/mergePreviewBridgeScripts";
@@ -44,6 +45,7 @@ const WebRuntimeManager = () => {
   const leadWithShellExitNextBootRef = useRef(false);
   const startSequenceRef = useRef<Promise<void> | null>(null);
   const syncSequenceRef = useRef<Promise<void>>(Promise.resolve());
+  const lastSyncedFileKeysRef = useRef<string[]>([]);
   const activeProjectRef = useRef<string | null>(null);
   const [runtimeRetryNonce, setRuntimeRetryNonce] = useState(0);
 
@@ -300,7 +302,22 @@ const WebRuntimeManager = () => {
         const withBridge = await mergePreviewBridgeScripts(
           normalizedProjectFiles,
         );
+        // Restore requires deletions, but `syncFiles` is additive-only.
+        // Delete any paths that were previously synced but are no longer present.
+        const prevKeys = lastSyncedFileKeysRef.current;
+        if (prevKeys.length > 0) {
+          const nextKeysSet = new Set(Object.keys(withBridge));
+          const removed = prevKeys.filter((key) => !nextKeysSet.has(key));
+          if (removed.length > 0) {
+            await Promise.all(
+              removed.map((path) =>
+                rm(path, { recursive: true, force: true }).catch(() => undefined),
+              ),
+            );
+          }
+        }
         await syncFiles(withBridge);
+        lastSyncedFileKeysRef.current = Object.keys(withBridge);
         lastCompletedSyncSignatureRef.current = projectFileSignature;
       });
 
