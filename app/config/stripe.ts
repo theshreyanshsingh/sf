@@ -71,33 +71,16 @@ export const createCheckoutSession = async ({
   const clientReferenceId =
     typeof id === "string" && id.trim().length > 0 ? id.trim() : undefined;
 
-  // Ensure a Stripe Customer exists (and reuse it if already created).
-  // This makes webhooks reliably include `customer: cus_...` even when the event payload
-  // doesn't include email/metadata.
-  let customerId: string | undefined;
-  if (normalizedEmail) {
-    const existing = await client.customers.list({ email: normalizedEmail, limit: 1 });
-    if (existing.data.length > 0) {
-      customerId = existing.data[0]!.id;
-    } else {
-      const created = await client.customers.create({
-        email: normalizedEmail,
-        metadata: {
-          email: normalizedEmail,
-          ...(clientReferenceId ? { pubId: clientReferenceId } : {}),
-          plan: "scale",
-        },
-      });
-      customerId = created.id;
-    }
-  }
-
   return client.checkout.sessions.create({
     mode: "subscription",
     line_items: [lineItem],
     success_url: STRIPE_SUCCESS_URL,
     cancel_url: STRIPE_CANCEL_URL,
-    ...(customerId ? { customer: customerId } : { customer_email: normalizedEmail }),
+    /**
+     * Let Stripe manage customer creation/association (previous behavior).
+     * This avoids requiring restricted-key customer write permissions.
+     */
+    customer_email: normalizedEmail,
     ...(clientReferenceId ? { client_reference_id: clientReferenceId } : {}),
     allow_promotion_codes: true,
     metadata: {
@@ -132,17 +115,22 @@ export const createBillingPortalSession = async ({
   let resolvedCustomerId = customerId || undefined;
 
   if (!resolvedCustomerId && email) {
-    const customers = await client.customers.list({
-      email,
-      limit: 1,
-    });
-    if (customers.data.length > 0) {
-      resolvedCustomerId = customers.data[0].id;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (normalizedEmail) {
+      const customers = await client.customers.list({
+        email: normalizedEmail,
+        limit: 1,
+      });
+      if (customers.data.length > 0) {
+        resolvedCustomerId = customers.data[0]!.id;
+      }
     }
   }
 
   if (!resolvedCustomerId) {
-    throw new Error("Stripe customer ID is required");
+    throw new Error(
+      "Stripe customer ID is required (no existing billing profile found).",
+    );
   }
   return client.billingPortal.sessions.create({
     customer: resolvedCustomerId,

@@ -20,8 +20,12 @@ export async function POST(request: NextRequest) {
     }
 
     const { customerId, returnUrl, email } = await request.json();
+    const tokenEmail =
+      typeof (token as any)?.email === "string" ? String((token as any).email) : "";
+    const resolvedEmail =
+      tokenEmail.trim().length > 0 ? tokenEmail.trim() : typeof email === "string" ? email : "";
 
-    if (!customerId && !email) {
+    if (!customerId && !resolvedEmail) {
       return NextResponse.json(
         { error: "Stripe customer ID or email is required" },
         { status: 400 }
@@ -49,7 +53,7 @@ export async function POST(request: NextRequest) {
 
     const portal = await createBillingPortalSession({
       customerId,
-      email,
+      email: resolvedEmail,
       returnUrl: finalReturnUrl,
     });
 
@@ -70,7 +74,10 @@ export async function POST(request: NextRequest) {
       }
       if (error.message.includes("Stripe customer ID")) {
         return NextResponse.json(
-          { error: error.message },
+          {
+            error:
+              "No billing profile found yet. Please upgrade once before using the billing portal.",
+          },
           { status: 400 }
         );
       }
