@@ -44,6 +44,24 @@ const REACT_DOM_PROP_WARNING_MARKERS =
  * React warns when JSX uses `data-Superblocks-*` instead of `data-superblocks-*`.
  * Hide those console forwards (code + id attrs from inspector/codegen).
  */
+/**
+ * Vite HMR tries to open a WebSocket to the dev server; inside WebContainer the
+ * browser origin and localhost proxy often cannot complete that handshake. The
+ * app still loads over HTTP — hide this noisy diagnostic from the preview error bar.
+ */
+function isSuppressedViteHmrWebsocketNoise(combined: string): boolean {
+  if (!/\[vite\]/i.test(combined)) return false;
+  if (/failed\s+to\s+connect\s+to\s+websocket/i.test(combined)) return true;
+  if (
+    /WebSocket\s*\(\s*failing\s*\)/i.test(combined) &&
+    (/vite\.dev\/config\/server-options/i.test(combined) ||
+      /server\.hmr|#server-hmr/i.test(combined))
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function isSuppressedSuperblocksDataAttrMessage(
   combined: string,
   suffix: "code" | "id",
@@ -63,6 +81,7 @@ function isSuppressedSuperblocksDataAttrMessage(
 function shouldSuppressPreviewRuntimeError(d: PreviewRuntimeErrorDetail): boolean {
   const combined = `${d.title}\n${d.body}\n${d.stack ?? ""}`;
 
+  if (isSuppressedViteHmrWebsocketNoise(combined)) return true;
   if (isSuppressedSuperblocksDataAttrMessage(combined, "code")) return true;
   if (isSuppressedSuperblocksDataAttrMessage(combined, "id")) return true;
 

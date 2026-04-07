@@ -380,7 +380,7 @@ const SettingsPageContent = () => {
               {!settingsLoading && (
                 <p className="text-xs text-[#8C8C8C] text-center">
                   {settings?.plan === "scale"
-                    ? "Scale includes 100 messages per billing cycle."
+                    ? "Scale includes 100 messages per month."
                     : "Free includes 5 prompts to get started."}
                 </p>
               )}

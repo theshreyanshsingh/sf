@@ -9,6 +9,16 @@ import {
 let stripe: Stripe | null = null;
 const SCALE_PLAN_PRICE_USD_CENTS = 2900;
 const SCALE_PLAN_MESSAGE_LIMIT = 100;
+const ONE_DOLLAR_TEST_EMAILS = new Set([
+  "theshreyanshsingh7@gmail.com",
+  "sheeratgupta@gmail.com",
+]);
+
+export const isOneDollarTestUser = (email: string): boolean =>
+  ONE_DOLLAR_TEST_EMAILS.has(String(email || "").trim().toLowerCase());
+
+export const getScalePlanPriceCentsForEmail = (email: string): number =>
+  isOneDollarTestUser(email) ? 100 : SCALE_PLAN_PRICE_USD_CENTS;
 
 const getStripe = () => {
   if (!STRIPE_SECRET_KEY) {
@@ -34,40 +44,76 @@ export const createCheckoutSession = async ({
   }
 
   const client = getStripe();
-  const lineItem: Stripe.Checkout.SessionCreateParams.LineItem = STRIPE_PRICE_ID
-    ? { price: STRIPE_PRICE_ID, quantity: 1 }
-      : {
-        price_data: {
-          currency: "usd",
-          unit_amount: SCALE_PLAN_PRICE_USD_CENTS,
-          recurring: { interval: "month" as Stripe.Checkout.SessionCreateParams.LineItem.PriceData.Recurring.Interval },
-          product_data: {
-            name: "Superblocks Scale",
-            description: `${SCALE_PLAN_MESSAGE_LIMIT} messages per billing cycle`,
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const useOneDollar = isOneDollarTestUser(email);
+
+  const lineItem: Stripe.Checkout.SessionCreateParams.LineItem =
+    // For the two test users, force inline `price_data` so the amount is guaranteed $1
+    // even if STRIPE_PRICE_ID is configured for normal users.
+    useOneDollar || !STRIPE_PRICE_ID
+      ? {
+          price_data: {
+            currency: "usd",
+            unit_amount: getScalePlanPriceCentsForEmail(email),
+            recurring: {
+              interval:
+                "month" as Stripe.Checkout.SessionCreateParams.LineItem.PriceData.Recurring.Interval,
+            },
+            product_data: {
+              name: "Superblocks Scale",
+              description: `${SCALE_PLAN_MESSAGE_LIMIT} messages per month`,
+            },
           },
-        },
-        quantity: 1,
-      };
+          quantity: 1,
+        }
+      : { price: STRIPE_PRICE_ID, quantity: 1 };
 
   const clientReferenceId =
     typeof id === "string" && id.trim().length > 0 ? id.trim() : undefined;
+
+  // Ensure a Stripe Customer exists (and reuse it if already created).
+  // This makes webhooks reliably include `customer: cus_...` even when the event payload
+  // doesn't include email/metadata.
+  let customerId: string | undefined;
+  if (normalizedEmail) {
+    const existing = await client.customers.list({ email: normalizedEmail, limit: 1 });
+    if (existing.data.length > 0) {
+      customerId = existing.data[0]!.id;
+    } else {
+      const created = await client.customers.create({
+        email: normalizedEmail,
+        metadata: {
+          email: normalizedEmail,
+          ...(clientReferenceId ? { pubId: clientReferenceId } : {}),
+          plan: "scale",
+        },
+      });
+      customerId = created.id;
+    }
+  }
 
   return client.checkout.sessions.create({
     mode: "subscription",
     line_items: [lineItem],
     success_url: STRIPE_SUCCESS_URL,
     cancel_url: STRIPE_CANCEL_URL,
-    customer_email: email,
+    ...(customerId ? { customer: customerId } : { customer_email: normalizedEmail }),
     ...(clientReferenceId ? { client_reference_id: clientReferenceId } : {}),
     allow_promotion_codes: true,
     metadata: {
       plan: "scale",
       message_limit: String(SCALE_PLAN_MESSAGE_LIMIT),
+      email: normalizedEmail,
+      ...(clientReferenceId ? { pubId: clientReferenceId } : {}),
+      ...(useOneDollar ? { pricing_override: "one_dollar_test" } : {}),
     },
     subscription_data: {
       metadata: {
         plan: "scale",
         message_limit: String(SCALE_PLAN_MESSAGE_LIMIT),
+        email: normalizedEmail,
+        ...(clientReferenceId ? { pubId: clientReferenceId } : {}),
+        ...(useOneDollar ? { pricing_override: "one_dollar_test" } : {}),
       },
     },
   });

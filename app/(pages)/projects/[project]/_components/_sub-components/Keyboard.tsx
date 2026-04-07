@@ -552,7 +552,7 @@ const Keyboard: NextPage = () => {
           <p className="text-xs font-sans font-medium text-[#b1b1b1] text-center">
             {effectivePlan === "free"
               ? "You have used all 5 free prompts. Upgrade to Scale for 100 messages."
-              : "You have used all 100 Scale messages for this billing cycle."}
+              : "You have used all 100 Scale messages for this month."}
           </p>
         </div>
       )}

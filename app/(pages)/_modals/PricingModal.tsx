@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuthenticated } from "@/app/helpers/useAuthenticated";
 import { useDispatch, useSelector } from "react-redux";
@@ -11,12 +11,43 @@ const PricingModal: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const { email } = useAuthenticated();
   const { id } = useSelector((state: RootState) => state.basicData);
+  const [displayPrice, setDisplayPrice] = useState<{
+    dollars: number;
+    suffix: string;
+  }>({ dollars: 29, suffix: "/month" });
   // State and dispatch from Redux store for modal open statu
   const { pricingModalOpen } = useSelector(
     (state: RootState) => state.basicData
   );
 
   const dispatch = useDispatch();
+
+  useEffect(() => {
+    let cancelled = false;
+    // Only fetch pricing when the modal is open (reduces calls).
+    if (!pricingModalOpen) return;
+    // Pricing is user-specific; only fetch when we have an email.
+    if (!email.value) return;
+    (async () => {
+      try {
+        const res = await fetch("/api/pricing", { method: "GET" });
+        if (!res.ok) return;
+        const data = (await res.json()) as any;
+        const cents =
+          typeof data?.scale?.priceCents === "number"
+            ? data.scale.priceCents
+            : null;
+        if (!cancelled && typeof cents === "number" && cents > 0) {
+          setDisplayPrice({ dollars: Math.round(cents / 100), suffix: "/month" });
+        }
+      } catch {
+        // Keep default.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pricingModalOpen, email.value]);
 
   const handleUpgrade = async () => {
     if (isLoading) return;
@@ -119,16 +150,16 @@ const PricingModal: React.FC = () => {
                 Scale
               </h3>
               <p className="text-[#b1b1b1] text-sm font-sans leading-snug px-1">
-                100 messages per billing cycle for teams ready to ship faster
+                100 messages per month for teams ready to ship faster
               </p>
             </div>
 
             {/* Price Section */}
             <div className="text-center mb-4 py-3 px-4 bg-[#1c1c1d] rounded-xl border border-[#2a2a2b]">
               <div className="text-3xl font-bold text-white mb-0.5">
-                $29
+                ${displayPrice.dollars}
                 <span className="text-lg font-normal text-[#71717A] ml-1.5">
-                  /month
+                  {displayPrice.suffix}
                 </span>
               </div>
               <p className="text-xs text-[#8C8C8C]">
@@ -158,10 +189,10 @@ const PricingModal: React.FC = () => {
                   </div>
                   <div>
                     <p className="text-white font-medium text-sm leading-tight">
-                      100 messages / billing cycle
+                      100 messages / month
                     </p>
                     <p className="text-[#8C8C8C] text-xs">
-                      Resets on renewal
+                      Resets monthly
                     </p>
                   </div>
                 </div>

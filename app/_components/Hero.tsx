@@ -390,6 +390,7 @@ const Hero = () => {
   const previewDropdownRef = useRef<HTMLDivElement>(null);
 
   const { isAuthenticated, email } = useAuthenticated();
+  const [scalePriceDollars, setScalePriceDollars] = useState<number>(29);
 
   const {
     needsUpgrade,
@@ -438,6 +439,34 @@ const Hero = () => {
     landingPreview === "mobile"
       ? "Turn one idea into a launch-ready mobile app experience with polished screens and flows."
       : "Turn a single idea, into a launch ready SEO-optimized application with hosting.";
+
+  // Fetch user-specific pricing (server-side decision).
+  useEffect(() => {
+    let cancelled = false;
+    if (!isAuthenticated.value || !email?.value) {
+      setScalePriceDollars(29);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await fetch("/api/pricing", { method: "GET" });
+        if (!res.ok) return;
+        const data = (await res.json()) as any;
+        const cents =
+          typeof data?.scale?.priceCents === "number"
+            ? data.scale.priceCents
+            : null;
+        if (!cancelled && typeof cents === "number" && cents > 0) {
+          setScalePriceDollars(Math.round(cents / 100));
+        }
+      } catch {
+        // Keep default.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated.value, email?.value]);
 
   const startingPointsHint =
     landingPreview === "mobile"
@@ -1348,7 +1377,7 @@ const Hero = () => {
             >
               <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 text-xs sm:text-sm font-sans font-medium text-white">
                 <span>
-                  You&rsquo;re out of prompts for this billing cycle. Open plans
+                  You&rsquo;re out of prompts for this month. Open plans
                   to upgrade or renew.
                 </span>
                 <span className="text-[#4F92E1] sm:underline">View pricing</span>
@@ -1902,14 +1931,13 @@ const Hero = () => {
                   <h3 className="text-lg font-semibold text-white">Scale</h3>
                 </div>
                 <div className="text-2xl sm:text-3xl font-bold text-white mb-1">
-                  $29
+                  ${scalePriceDollars}
                   <span className="text-base sm:text-lg font-normal text-[#71717A]">
                     /month
                   </span>
                 </div>
                 <p className="text-[#b1b1b1] text-xs sm:text-sm leading-snug">
-                  Expand your build capacity with 100 messages every billing
-                  cycle
+                  Expand your build capacity with 100 messages every month
                 </p>
               </div>
 
@@ -1937,7 +1965,7 @@ const Hero = () => {
                 <div className="flex items-start gap-2.5">
                   <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
                   <span className="text-white text-xs sm:text-sm leading-snug">
-                    100 messages / billing cycle
+                    100 messages / month
                   </span>
                 </div>
                 <div className="flex items-start gap-2.5">
