@@ -147,6 +147,17 @@ export function useProject() {
       restoredRef.current = null;
     }
 
+    const storedChatId =
+      typeof window !== "undefined"
+        ? sessionStorage.getItem(`superblocksChatId_${projectId}`) ||
+          sessionStorage.getItem("chatId")
+        : null;
+    const effectiveChatId = didReset ? null : currentChatId;
+    const resolvedChatId = effectiveChatId || storedChatId || undefined;
+    if (resolvedChatId && resolvedChatId !== currentChatId) {
+      dispatch(setChatId(resolvedChatId));
+    }
+
     if (
       fetchInFlightRef.current === projectId ||
       fetchedRef.current === projectId ||
@@ -203,17 +214,6 @@ export function useProject() {
     const shouldApplyStartingPoint =
       !!startingTemplate &&
       (!!restoredData?.startingPoint || !messages || messages.length < 1);
-
-    const storedChatId =
-      typeof window !== "undefined"
-        ? sessionStorage.getItem(`superblocksChatId_${projectId}`) ||
-          sessionStorage.getItem("chatId")
-        : null;
-    const effectiveChatId = didReset ? null : currentChatId;
-    const resolvedChatId = effectiveChatId || storedChatId || undefined;
-    if (resolvedChatId && resolvedChatId !== currentChatId) {
-      dispatch(setChatId(resolvedChatId));
-    }
 
     const normalizedUserRequest = lastMessageContent.trim();
     const normalizedStartingPrompt = startingTemplate?.prompt?.trim() || "";

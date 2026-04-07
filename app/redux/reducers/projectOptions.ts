@@ -2,6 +2,7 @@ import { API } from "@/app/config/publicEnv";
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit";
 
 import { clearImagesURL, setClaudeApiKey, setId, setPlan } from "./basicData";
+import { setChatId } from "./chatSlice";
 import {
   DEFAULT_PREVIEW_RUNTIME,
   DEFAULT_PREVIEW_SNACK_DEPENDENCIES,
@@ -165,6 +166,32 @@ export const fetchProject = createAsyncThunk<
       (typeof data?.code_url === "string" && data.code_url.trim()) ||
       (typeof data?.url === "string" && data.url.trim()) ||
       "";
+
+    const hydratedChatId =
+      typeof data.chatId === "string" && data.chatId.trim()
+        ? data.chatId.trim()
+        : "";
+    const pid =
+      typeof data.projectId === "string" && data.projectId.trim()
+        ? data.projectId.trim()
+        : "";
+    if (hydratedChatId && pid) {
+      const key = `superblocksChatId_${pid}`;
+      const perProjectStored =
+        typeof window !== "undefined"
+          ? window.sessionStorage.getItem(key)?.trim() || ""
+          : "";
+      const { chatId: reduxChatId } = thunkAPI.getState().messagesprovider;
+      const shouldApplyHydratedChatId =
+        !reduxChatId ||
+        (!perProjectStored && reduxChatId !== hydratedChatId);
+      if (shouldApplyHydratedChatId) {
+        thunkAPI.dispatch(setChatId(hydratedChatId));
+      }
+      if (typeof window !== "undefined" && !window.sessionStorage.getItem(key)) {
+        window.sessionStorage.setItem(key, hydratedChatId);
+      }
+    }
 
     return {
       title: data.title,

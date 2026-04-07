@@ -863,6 +863,12 @@ const Messages = () => {
       session?.user?.email && session.user.email.trim().length > 0;
 
     if (!isValidChatId || !generatedName || !isValidUser) {
+      // After resetChatState() chatId becomes null but refs can still think we
+      // "already loaded" the previous id — same id restored then skips fetch.
+      if (!isValidChatId) {
+        hasLoadedInitialMessages.current = false;
+        currentChatIdRef.current = null;
+      }
       setIsInitialLoading(false);
       return;
     }
@@ -922,7 +928,7 @@ const Messages = () => {
             );
             syncTodosFromHydratedMessages(convertedMessages, dispatch);
             setTimeout(() => {
-              scrollChatToLatest();
+              messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
             }, 100);
           } else {
             // Reset flag if fetch failed so we can retry
@@ -947,7 +953,6 @@ const Messages = () => {
     getProjectIdFromPath,
     convertChatToMessage,
     dispatch,
-    scrollChatToLatest,
   ]);
 
   // Load more messages when scrolling to top
