@@ -83,5 +83,5 @@ export const useSettings = () => {
     }
   }, [email.value]);
 
-  return { data, isLoading, error };
+  return { data, isLoading, error, refetch: fetchSettings };
 };

@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 
 import { motion } from "framer-motion";
 import { useAuthenticated } from "@/app/helpers/useAuthenticated";
@@ -16,15 +16,17 @@ import {
   ensureProjectCompletionNotificationPreference,
   setProjectCompletionNotificationEnabled,
 } from "@/app/helpers/notificationPreferences";
+import { useSearchParams } from "next/navigation";
 
-const Page = () => {
+const SettingsPageContent = () => {
   const [isManaging, setIsManaging] = useState(false);
   const [playCompletionNotification, setPlayCompletionNotification] =
     useState(false);
 
   const dispatch = useDispatch();
   const { email } = useAuthenticated();
-  const { data: settings, isLoading: settingsLoading } = useSettings();
+  const { data: settings, isLoading: settingsLoading, refetch } = useSettings();
+  const searchParams = useSearchParams();
   const maxPrompts =
     typeof settings?.maxPrompts === "number"
       ? settings.maxPrompts
@@ -45,6 +47,15 @@ const Page = () => {
       ensureProjectCompletionNotificationPreference(),
     );
   }, []);
+
+  // After Stripe redirects back, refresh settings to pick up webhook updates.
+  useEffect(() => {
+    const success = searchParams?.get("success");
+    const canceled = searchParams?.get("canceled");
+    if (success === "1" || canceled === "1") {
+      void refetch();
+    }
+  }, [searchParams, refetch]);
 
   const formatNumber = (value: number) =>
     new Intl.NumberFormat("en-US").format(value);
@@ -426,5 +437,17 @@ const Page = () => {
     </div>
   );
 };
+
+const Page = () => (
+  <Suspense
+    fallback={
+      <div className="flex min-h-[85vh] items-center justify-center bg-[#000000]">
+        <LuLoaderCircle className="h-8 w-8 animate-spin text-[#4a90e2]" />
+      </div>
+    }
+  >
+    <SettingsPageContent />
+  </Suspense>
+);
 
 export default Page;

@@ -181,7 +181,9 @@ export const fetchProject = createAsyncThunk<
         typeof window !== "undefined"
           ? window.sessionStorage.getItem(key)?.trim() || ""
           : "";
-      const { chatId: reduxChatId } = thunkAPI.getState().messagesprovider;
+      const reduxChatId = (
+        thunkAPI.getState() as { messagesprovider: { chatId: string | null } }
+      ).messagesprovider.chatId;
       const shouldApplyHydratedChatId =
         !reduxChatId ||
         (!perProjectStored && reduxChatId !== hydratedChatId);
