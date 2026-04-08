@@ -2,11 +2,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { FaCode, FaFilePdf } from "react-icons/fa";
 import Image from "next/image";
-import {
-  LuCheck,
-  LuCornerUpLeft,
-  LuLoaderCircle,
-} from "react-icons/lu";
+import { LuLoaderCircle } from "react-icons/lu";
 import { IoClose } from "react-icons/io5";
 
 import { useSelector, useDispatch } from "react-redux";
@@ -38,21 +34,9 @@ import {
   dbMessageToUiMessage,
   syncTodosFromHydratedMessages,
 } from "@/app/_services/agentMessageNormalize";
-import {
-  clearAllFiles,
-  updateSpecificFile,
-  updateSpecificFilesBatch,
-} from "@/app/redux/reducers/projectFiles";
-import { refreshPreview, setStreamActive, setUrl } from "@/app/redux/reducers/projectOptions";
+import { updateSpecificFile } from "@/app/redux/reducers/projectFiles";
 import { FaChevronDown, FaChevronUp } from "react-icons/fa";
-import { API } from "@/app/config/publicEnv";
 import { useGetChatMessages } from "@/app/_services/useChatOperations";
-import {
-  dedupeFileWrites,
-  extractFileWritesFromSnapshot,
-} from "@/app/_services/fileUpdatesMobile";
-import { fetchProjectSnapshot } from "@/app/helpers/fetchProjectSnapshot";
-
 // Collapsible Image Component
 const CollapsibleImage = ({ src, alt }: { src: string; alt?: string }) => {
   const [isExpanded, setIsExpanded] = useState(true); // Default to open
@@ -691,12 +675,14 @@ const Messages = () => {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  /* Restore UI disabled — re-enable with button + handler below
   const [restoringMessageId, setRestoringMessageId] = useState<string | null>(
     null,
   );
   const [restoredMessageIds, setRestoredMessageIds] = useState<Set<string>>(
     new Set(),
   );
+  */
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -1075,119 +1061,9 @@ const Messages = () => {
     }
   };
 
-  // Function to restore code from CloudFront URL
-  const handleRestoreCode = async (messageId: string) => {
-    if (!API) {
-      console.error("API URL is not configured");
-      return;
-    }
-
-    if (!session?.user?.email) {
-      console.error("User email not found");
-      return;
-    }
-
-    const generatedName = getProjectIdFromPath();
-    if (!generatedName) {
-      console.error("Project ID not found");
-      return;
-    }
-
-    // Use the original _id if available, otherwise fall back to id
-    const messageToSend = messageId;
-
-    if (!messageToSend) {
-      console.error("Message ID is required");
-      return;
-    }
-
-    try {
-      setRestoringMessageId(messageId);
-
-      const response = await fetch(`${API}/restore`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messageId: messageToSend,
-          owner: session.user.email,
-          projectId: generatedName,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || "Failed to restore code");
-      }
-
-      const data = await response.json();
-
-      // If restore was successful, fetch and apply the code
-      if (data.success && data.codeUrl) {
-        try {
-          // Persist effective snapshot URL in Redux so refresh hydration uses restored checkpoint.
-          dispatch(setUrl(data.codeUrl));
-
-          const codeData = await fetchProjectSnapshot({
-            projectId: generatedName,
-            userEmail: session.user.email,
-            codeUrl: data.codeUrl,
-          });
-          const fileWrites = dedupeFileWrites(
-            extractFileWritesFromSnapshot(codeData),
-          );
-
-          if (!fileWrites.length) {
-            console.error(
-              "[restore] Snapshot contained no extractable file writes",
-              { codeDataKeys: codeData && typeof codeData === "object" ? Object.keys(codeData as object) : [] },
-            );
-            dispatch(setStreamActive(false));
-            dispatch(refreshPreview());
-            throw new Error("Restored snapshot had no files to apply.");
-          }
-
-          // Replace local project state with the checkpoint (merge would leave stale paths).
-          dispatch(clearAllFiles());
-          dispatch(
-            updateSpecificFilesBatch(
-              fileWrites.map((w) => ({
-                filePath: w.path,
-                content: w.content,
-                createDirectories: true,
-              })),
-            ),
-          );
-
-          dispatch(setStreamActive(false));
-
-          // Mark this message as successfully restored
-          setRestoredMessageIds((prev) => new Set(prev).add(messageId));
-
-          // Refresh the preview to show the restored code
-          // Increment refresh counter to force iframe reload (changes iframe key)
-          dispatch(refreshPreview());
-          // Clear the refreshing state after a delay (refreshPreview sets it to true)
-          setTimeout(() => {
-            // dispatch(setIsRefreshing(false));
-          }, 1500);
-        } catch (fetchError) {
-          console.error("Error fetching or applying code:", fetchError);
-          throw new Error(
-            `Failed to fetch code: ${
-              fetchError instanceof Error ? fetchError.message : "Unknown error"
-            }`,
-          );
-        }
-      }
-    } catch (error) {
-      console.error("Error restoring code:", error);
-      // Optionally show an error notification
-    } finally {
-      setRestoringMessageId(null);
-    }
-  };
+  /* Restore handler — pair with state + button when re-enabling
+  const handleRestoreCode = async (messageId: string) => { ... };
+  */
 
   return (
     <div
@@ -1801,44 +1677,10 @@ const Messages = () => {
                               {userDisplayText ? (
                                 <CollapsibleUserPromptText
                                   text={userDisplayText}
-                                  reserveRightForRestore={!!codeInfo?.id}
+                                  reserveRightForRestore={false}
                                 />
                               ) : null}
-                              {codeInfo?.id ? (
-                                <button
-                                  type="button"
-                                  title={
-                                    restoredMessageIds.has(codeInfo.id)
-                                      ? "Restored"
-                                      : "Restore project to this point"
-                                  }
-                                  onClick={() =>
-                                    handleRestoreCode(codeInfo.id)
-                                  }
-                                  disabled={
-                                    restoringMessageId === codeInfo.id ||
-                                    restoredMessageIds.has(codeInfo.id)
-                                  }
-                                  className="absolute bottom-2 right-2 z-[2] rounded-md p-0.5 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  {restoringMessageId === codeInfo.id ? (
-                                    <LuLoaderCircle
-                                      className="h-3 w-3 shrink-0 animate-spin"
-                                      strokeWidth={2.25}
-                                    />
-                                  ) : restoredMessageIds.has(codeInfo.id) ? (
-                                    <LuCheck
-                                      className="h-3 w-3 shrink-0 text-zinc-500"
-                                      strokeWidth={2.25}
-                                    />
-                                  ) : (
-                                    <LuCornerUpLeft
-                                      className="h-3 w-3 shrink-0"
-                                      strokeWidth={2.25}
-                                    />
-                                  )}
-                                </button>
-                              ) : null}
+                              {/* Restore-to-checkpoint button: disabled — re-enable with state/handler block marked "Restore UI disabled" */}
                             </div>
                           )}
                           <div

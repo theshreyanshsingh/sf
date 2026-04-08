@@ -18,6 +18,15 @@ import { WEB_DEV_SERVER_SHELL_COMMAND } from "@/app/helpers/webContainerDevServe
 
 const FALLBACK_BOOTSTRAP_TIMEOUT_MS = 8000;
 
+/** Stable, cheap content fingerprint so sync runs when bytes change, not only when lengths change. */
+function djb2Hash(str: string): string {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 33) ^ str.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(16);
+}
+
 const WebRuntimeManager = () => {
   const dispatch = useDispatch();
   const { previewRuntime, projectId, isStreamActive, url, generationSuccess } = useSelector(
@@ -55,7 +64,10 @@ const WebRuntimeManager = () => {
 
     return [...fileKeys]
       .sort()
-      .map((key) => `${key}:${normalizedProjectFiles[key]?.length ?? 0}`)
+      .map((key) => {
+        const c = normalizedProjectFiles[key] ?? "";
+        return `${key}:${c.length}:${djb2Hash(c)}`;
+      })
       .join("|");
   }, [normalizedProjectFiles]);
 

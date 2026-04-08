@@ -44,6 +44,7 @@ const REACT_DOM_PROP_WARNING_MARKERS =
  * React warns when JSX uses `data-Superblocks-*` instead of `data-superblocks-*`.
  * Hide those console forwards (code + id attrs from inspector/codegen).
  */
+
 /**
  * Vite HMR tries to open a WebSocket to the dev server; inside WebContainer the
  * browser origin and localhost proxy often cannot complete that handshake. The
@@ -60,6 +61,20 @@ function isSuppressedViteHmrWebsocketNoise(combined: string): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Chromium logs `WebSocket connection to 'wss://…webcontainer-api.io/…' failed:
+ * Error during WebSocket handshake: Empty response` for Vite HMR — expected in preview.
+ */
+function isSuppressedWebContainerWebsocketHandshake(combined: string): boolean {
+  if (!/webcontainer-api\.io/i.test(combined)) return false;
+  if (!/WebSocket\s+connection\s+to/i.test(combined)) return false;
+  if (!/\bfailed\b/i.test(combined)) return false;
+  return (
+    /WebSocket\s+handshake/i.test(combined) ||
+    /Empty\s+response/i.test(combined)
+  );
 }
 
 function isSuppressedSuperblocksDataAttrMessage(
@@ -82,6 +97,7 @@ function shouldSuppressPreviewRuntimeError(d: PreviewRuntimeErrorDetail): boolea
   const combined = `${d.title}\n${d.body}\n${d.stack ?? ""}`;
 
   if (isSuppressedViteHmrWebsocketNoise(combined)) return true;
+  if (isSuppressedWebContainerWebsocketHandshake(combined)) return true;
   if (isSuppressedSuperblocksDataAttrMessage(combined, "code")) return true;
   if (isSuppressedSuperblocksDataAttrMessage(combined, "id")) return true;
 
