@@ -117,6 +117,8 @@ export const fetchProject = createAsyncThunk<
     tokensRemaining?: number;
     startingPoint?: string | null;
     previewRuntime?: PreviewRuntime | null;
+    siteMetaTitle?: string | null;
+    siteFaviconUrl?: string | null;
   },
   FetchProjectParams
 >("projectOptions/fetchProject", async ({ string: requestBody }, thunkAPI) => {
@@ -217,6 +219,14 @@ export const fetchProject = createAsyncThunk<
         resolvedPreviewRuntime === "mobile" || resolvedPreviewRuntime === "web"
           ? resolvedPreviewRuntime
           : null,
+      siteMetaTitle:
+        data.siteMetaTitle != null && typeof data.siteMetaTitle === "string"
+          ? data.siteMetaTitle
+          : null,
+      siteFaviconUrl:
+        data.siteFaviconUrl != null && typeof data.siteFaviconUrl === "string"
+          ? data.siteFaviconUrl
+          : null,
     };
   } catch (error: unknown) {
     return thunkAPI.rejectWithValue(error);
@@ -276,6 +286,10 @@ interface PlanState {
   previewSnackFiles: PreviewSnackFiles;
   previewSnackDependencies: PreviewSnackDependencies;
   urlLoadId: number;
+  /** Browser tab title for the published site; null keeps the build template default */
+  siteMetaTitle: string | null;
+  /** HTTPS URL for the published favicon; null keeps the template default */
+  siteFaviconUrl: string | null;
 }
 
 const buildInitialState = (): PlanState => ({
@@ -320,6 +334,8 @@ const buildInitialState = (): PlanState => ({
   previewSnackFiles: { ...DEFAULT_PREVIEW_SNACK_FILES },
   previewSnackDependencies: { ...DEFAULT_PREVIEW_SNACK_DEPENDENCIES },
   urlLoadId: 0,
+  siteMetaTitle: null,
+  siteFaviconUrl: null,
 });
 
 // Initial state is empty
@@ -688,6 +704,16 @@ const projectOptions = createSlice({
         previewSnackDependencies: { ...DEFAULT_PREVIEW_SNACK_DEPENDENCIES },
       };
     },
+    setSiteDeployMeta: (
+      state,
+      action: PayloadAction<{
+        siteMetaTitle: string | null;
+        siteFaviconUrl: string | null;
+      }>,
+    ) => {
+      state.siteMetaTitle = action.payload.siteMetaTitle;
+      state.siteFaviconUrl = action.payload.siteFaviconUrl;
+    },
     resetProjectOptions: () => buildInitialState(),
   },
   extraReducers: (builder) => {
@@ -715,6 +741,8 @@ const projectOptions = createSlice({
           tokensRemaining?: number | null;
           startingPoint?: string | null;
           previewRuntime?: PreviewRuntime | null;
+          siteMetaTitle?: string | null;
+          siteFaviconUrl?: string | null;
         }>
       ) => {
         state.url = null;
@@ -750,6 +778,16 @@ const projectOptions = createSlice({
             ? action.payload.tokensRemaining
             : null;
         state.startingPoint = action.payload.startingPoint || null;
+        state.siteMetaTitle =
+          action.payload.siteMetaTitle != null &&
+          typeof action.payload.siteMetaTitle === "string"
+            ? action.payload.siteMetaTitle
+            : null;
+        state.siteFaviconUrl =
+          action.payload.siteFaviconUrl != null &&
+          typeof action.payload.siteFaviconUrl === "string"
+            ? action.payload.siteFaviconUrl
+            : null;
       }
     );
     builder.addCase(fetchProject.rejected, (state) => {
@@ -793,6 +831,7 @@ export const {
   setPreviewSnackDependencies,
   updatePreviewSnackDependencies,
   resetPreviewSnackState,
+  setSiteDeployMeta,
   resetProjectOptions,
 } = projectOptions.actions;
 export default projectOptions.reducer;

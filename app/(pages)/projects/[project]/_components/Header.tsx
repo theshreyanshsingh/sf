@@ -6,13 +6,14 @@ import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/app/redux/store";
 import JSZip from "jszip";
 
-import { TbChartDots3, TbDownload, TbRocket } from "react-icons/tb";
+import { TbChartDots3, TbDownload, TbRocket, TbSettings } from "react-icons/tb";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuthenticated } from "@/app/helpers/useAuthenticated";
 import { API } from "@/app/config/publicEnv";
 import { setNotification } from "@/app/redux/reducers/NotificationModalReducer";
 import { LuLoaderCircle } from "react-icons/lu";
 import { STARTING_POINTS } from "@/app/config/startingPoints";
+import SiteDeployOptionsModal from "./SiteDeployOptionsModal";
 
 type PublishPhase = "idle" | "queued" | "building" | "failed";
 
@@ -38,6 +39,7 @@ const Header: NextPage = () => {
   const router = useRouter();
   const dispatch = useDispatch();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [siteOptionsOpen, setSiteOptionsOpen] = useState(false);
 
   const [publishSubmitting, setPublishSubmitting] = useState(false);
   const [publishPhase, setPublishPhase] = useState<PublishPhase>("idle");
@@ -288,6 +290,11 @@ const Header: NextPage = () => {
 
   return (
     <div className="sticky top-0 z-50 flex h-11 w-full shrink-0 items-center justify-between border-b border-[#2a2a2a] bg-[#111214]/95 px-2 shadow-md backdrop-blur-sm md:px-3">
+      <SiteDeployOptionsModal
+        isOpen={siteOptionsOpen}
+        onClose={() => setSiteOptionsOpen(false)}
+        projectId={getProjectId()}
+      />
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
         <button
           onClick={() => {
@@ -332,6 +339,17 @@ const Header: NextPage = () => {
       <div className="hidden shrink-0 items-center space-x-4 md:flex">
         {/* Primary Action */}
         <div className="relative group flex min-w-0 max-w-[min(100%,520px)] items-center gap-x-2 md:gap-x-3">
+          {!isMobilePreviewRuntime && (
+            <button
+              type="button"
+              onClick={() => setSiteOptionsOpen(true)}
+              className="flex items-center gap-1 rounded-md px-2.5 py-[2px] text-white hover:bg-[#252525]"
+              title="Published site title & favicon"
+            >
+              <TbSettings className="text-lg" />
+              <span className="hidden text-xs sm:inline">Options</span>
+            </button>
+          )}
           {(isMobilePreviewRuntime || !publishBusy) && (
             <button
               onClick={handlePrimaryAction}
@@ -457,6 +475,19 @@ const Header: NextPage = () => {
           >
             {email.value}
           </div>
+
+          {!isMobilePreviewRuntime && (
+            <button
+              type="button"
+              onClick={() => {
+                setSiteOptionsOpen(true);
+                setDropdownOpen(false);
+              }}
+              className="block w-full text-left px-4 py-2 text-xs text-white hover:bg-[#252525]"
+            >
+              Site options
+            </button>
+          )}
 
           {(isMobilePreviewRuntime || !publishBusy) && (
             <button

@@ -1442,8 +1442,8 @@ const Hero = () => {
                     (needsUpgrade as boolean)
                   }
                   onClick={handleFigmaImport}
-                  className="hidden cursor-pointer items-center justify-center gap-x-1 rounded-md p-2 text-xs font-sans font-medium text-[#b1b1b1] transition-colors hover:bg-[#2a292c] md:flex"
-                  title="Attach image"
+                  className="cursor-pointer items-center justify-center gap-x-1 rounded-md p-2 text-xs font-sans font-medium text-[#b1b1b1] transition-colors hover:bg-[#2a292c] hidden md:flex"
+                  title="Import from Figma URL"
                 >
                   <CgFigma />
                   <div className="hidden md:block">Import from Figma</div>

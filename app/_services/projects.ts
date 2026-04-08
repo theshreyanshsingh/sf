@@ -114,12 +114,16 @@ export const updateProject = async ({
   name,
   value,
   email,
+  siteMetaTitle,
+  siteFaviconUrl,
 }: {
   projectId: string;
   action: string;
   name?: string;
   value?: boolean;
   email?: string;
+  siteMetaTitle?: string | null;
+  siteFaviconUrl?: string | null;
 }): Promise<{
   success: boolean;
   message?: string;
@@ -138,6 +142,8 @@ export const updateProject = async ({
       name,
       value,
       email: resolvedEmail,
+      siteMetaTitle,
+      siteFaviconUrl,
     }),
   }).then((res) => res.json());
 };
