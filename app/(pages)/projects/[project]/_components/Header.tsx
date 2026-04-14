@@ -11,9 +11,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuthenticated } from "@/app/helpers/useAuthenticated";
 import { API } from "@/app/config/publicEnv";
 import { setNotification } from "@/app/redux/reducers/NotificationModalReducer";
+import { patchProjectOptions } from "@/app/redux/reducers/projectOptions";
 import { LuLoaderCircle } from "react-icons/lu";
-import { STARTING_POINTS } from "@/app/config/startingPoints";
-import SiteDeployOptionsModal from "./SiteDeployOptionsModal";
+import ProjectWorkspaceOptionsModal from "./ProjectWorkspaceOptionsModal";
 
 type PublishPhase = "idle" | "queued" | "building" | "failed";
 
@@ -21,11 +21,14 @@ const Header: NextPage = () => {
   const { title, startingPoint, isStreamActive, previewRuntime } = useSelector(
     (state: RootState) => state.projectOptions
   );
+  const switcherPointerLocked = Boolean(isStreamActive);
   const projectData = useSelector((state: RootState) => state.projectFiles.data);
 
-  const startingPointLabel = STARTING_POINTS.find(
-    (item) => item.id === startingPoint
-  )?.label;
+  const startingPointLabel = startingPoint
+    ? startingPoint
+        .replace(/^community-/i, "")
+        .replace(/-/g, " ")
+    : null;
 
   const [actionLoading, setActionLoading] = useState(false);
   const pathname = usePathname();
@@ -92,6 +95,20 @@ const Header: NextPage = () => {
       let phase = data.phase as PublishPhase;
       if (phase === "failed") phase = "idle";
       setPublishPhase(phase);
+      const du =
+        typeof data.deployedUrl === "string" ? data.deployedUrl.trim() : "";
+      const di =
+        typeof data.deployedImage === "string"
+          ? data.deployedImage.trim()
+          : "";
+      if (du || di) {
+        dispatch(
+          patchProjectOptions({
+            deployedUrl: du || null,
+            deployedImage: di || null,
+          }),
+        );
+      }
     };
 
     const tick = async () => {
@@ -127,6 +144,7 @@ const Header: NextPage = () => {
     fetchPublishStatus,
     publishPhase,
     publishSubmitting,
+    dispatch,
   ]);
 
   const normalizedFiles = useMemo(() => {
@@ -290,7 +308,7 @@ const Header: NextPage = () => {
 
   return (
     <div className="sticky top-0 z-50 flex h-11 w-full shrink-0 items-center justify-between border-b border-[#2a2a2a] bg-[#111214]/95 px-2 shadow-md backdrop-blur-sm md:px-3">
-      <SiteDeployOptionsModal
+      <ProjectWorkspaceOptionsModal
         isOpen={siteOptionsOpen}
         onClose={() => setSiteOptionsOpen(false)}
         projectId={getProjectId()}
@@ -298,7 +316,7 @@ const Header: NextPage = () => {
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
         <button
           onClick={() => {
-            router.push("/");
+            window.location.href = "/";
           }}
           className="hidden shrink-0 cursor-pointer text-sm font-[insSerifIt] font-semibold tracking-tight text-white sm:block"
         >
@@ -329,7 +347,7 @@ const Header: NextPage = () => {
       <div className="pointer-events-none absolute inset-y-0 left-1/2 hidden -translate-x-1/2 items-center md:flex">
         <div
           className={`pointer-events-auto px-2 ${
-            publishLocked ? "pointer-events-none opacity-50" : ""
+            switcherPointerLocked ? "pointer-events-none opacity-50" : ""
           }`}
         >
           <Switcher />
@@ -344,7 +362,7 @@ const Header: NextPage = () => {
               type="button"
               onClick={() => setSiteOptionsOpen(true)}
               className="flex items-center gap-1 rounded-md px-2.5 py-[2px] text-white hover:bg-[#252525]"
-              title="Published site title & favicon"
+              title="Project and site options"
             >
               <TbSettings className="text-lg" />
               <span className="hidden text-xs sm:inline">Options</span>
@@ -408,7 +426,7 @@ const Header: NextPage = () => {
 
           <button
             onClick={() => {
-              router.push("/settings");
+              window.location.href = "/workspace/profile";
             }}
             className="cursor-pointer bg-white text-black text-xs font-medium px-2 p-1 rounded-md"
             title="Account & settings"
@@ -441,7 +459,9 @@ const Header: NextPage = () => {
             {publishStatusLabel}
           </div>
         ) : null}
-        <div className={publishLocked ? "pointer-events-none opacity-50" : ""}>
+        <div
+          className={switcherPointerLocked ? "pointer-events-none opacity-50" : ""}
+        >
           <Switcher />
         </div>
         {/* Mobile Chat Trigger */}
@@ -468,8 +488,8 @@ const Header: NextPage = () => {
         <div className="md:hidden overflow-hidden absolute right-1 top-9 mt-2 w-30 bg-[#1A1A1A] rounded-md shadow-lg z-40 border border-[#252525]">
           <div
             onClick={() => {
-              router.push("/settings");
               setDropdownOpen(false);
+              window.location.href = "/workspace/profile";
             }}
             className="cursor-pointer text-white truncate text-xs font-medium px-4 py-2 rounded-md hover:bg-[#252525]"
           >

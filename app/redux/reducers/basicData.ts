@@ -1,7 +1,7 @@
 import { API } from "@/app/config/publicEnv";
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit";
 
-interface Project {
+export interface Project {
   title: string;
   generatedName: string;
   input?: string;
@@ -13,6 +13,12 @@ interface Project {
   updatedAt: string;
   isPublic: boolean;
   deployed_url: string;
+  /** Web vs mobile builder target — drives list card icon */
+  previewRuntime?: "web" | "mobile" | null;
+  templateSlug?: string | null;
+  templateCategory?: string | null;
+  siteMetaTitle?: string | null;
+  siteFaviconUrl?: string | null;
 }
 
 interface userState {

@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
 
     const finalReturnUrl = envReturnUrl
       ? envReturnUrl
-      : `${origin.replace(/\/$/, "")}/settings`;
+      : `${origin.replace(/\/$/, "")}/workspace/profile`;
 
     const portal = await createBillingPortalSession({
       customerId,

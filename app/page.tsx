@@ -1,8 +1,12 @@
-import React from 'react'
-import Hero from './_components/Hero'
+import React, { Suspense } from "react";
+import Hero from "./_components/Hero";
 
 const page = () => {
-  return <Hero/>
-}
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#06070a]" />}>
+      <Hero />
+    </Suspense>
+  );
+};
 
-export default page
+export default page;

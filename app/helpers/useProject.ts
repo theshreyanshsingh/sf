@@ -195,7 +195,7 @@ export function useProject() {
     }
     const requestedPreviewRuntime = restoredData?.previewRuntime || undefined;
 
-    if (restoredData && requestedPreviewRuntime !== "mobile") {
+    if (restoredData) {
       dispatch(
         setGenerating({
           generating: true,

@@ -344,7 +344,7 @@ export const useResponse = () => {
     try {
       if (!email) return;
 
-      const selectedModel = sessionStorage.getItem("model") || "claude-sonnet-4.5";
+      const selectedModel = sessionStorage.getItem("model") || "claude-sonnet-4.6";
       const selectedFramework =
         sessionStorage.getItem("framework") || framework;
 

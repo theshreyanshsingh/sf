@@ -5,6 +5,7 @@ import { API } from "../config/publicEnv";
 import { setNotification } from "../redux/reducers/NotificationModalReducer";
 import {
   setStreamActive,
+  setGenerating,
   setModel,
   setPreviewRuntime,
   lockPreviewRuntime,
@@ -797,6 +798,13 @@ export const useCreateResponse = () => {
 
           dispatch(setStreamActive(false));
           dispatch(setStreamChatId(null)); // Clear stream chat ID
+          dispatch(
+            setGenerating({
+              generating: false,
+              isResponseCompleted: true,
+              generationSuccess: "success",
+            }),
+          );
         }
       }
       //stream needed
@@ -1056,6 +1064,13 @@ export const useCreateResponse = () => {
             finalizeStreamAgentRun();
             dispatch(setStreamActive(false));
             dispatch(setStreamChatId(null));
+            dispatch(
+              setGenerating({
+                generating: false,
+                isResponseCompleted: true,
+                generationSuccess: "success",
+              }),
+            );
             persistProjectRuntime(projectId, previewRuntimeRef.current);
             console.warn("Stream ended 1");
             await maybeRunWebCommandsAfterStream(updatedPackageJsonPath);
@@ -1527,6 +1542,13 @@ export const useCreateResponse = () => {
           finalizeStreamAgentRun();
           dispatch(setStreamActive(false));
           dispatch(setStreamChatId(null));
+          dispatch(
+            setGenerating({
+              generating: false,
+              isResponseCompleted: true,
+              generationSuccess: "success",
+            }),
+          );
           persistProjectRuntime(projectId, previewRuntimeRef.current);
           await maybeRunWebCommandsAfterStream(updatedPackageJsonPath);
           break;

@@ -55,6 +55,7 @@ import {
   FaChevronDown,
   FaMicrophone,
   FaStop,
+  FaPlus,
 } from "react-icons/fa6";
 import { useDispatch } from "react-redux";
 import {
@@ -74,12 +75,19 @@ import { API } from "../config/publicEnv";
 import { setNotification } from "../redux/reducers/NotificationModalReducer";
 import { useSubscriptionCheck } from "../helpers/useSubscriptionCheck";
 import { clearAllFiles, EmptySheet } from "../redux/reducers/projectFiles";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BorderBeam } from "@/components/magicui/border-beam";
 import { Meteors } from "@/components/magicui/meteors";
-import { MorphingText } from "@/components/magicui/morphing-text";
 import { IoIosArrowDown } from "react-icons/io";
 import { CiLaptop, CiMobile1 } from "react-icons/ci";
+import {
+  IoAppsOutline,
+  IoBrowsersOutline,
+  IoChevronForward,
+  IoGridOutline,
+  IoPhonePortraitOutline,
+  IoStatsChartOutline,
+} from "react-icons/io5";
 
 import {
   clearMessages,
@@ -89,12 +97,16 @@ import {
 } from "../redux/reducers/chatSlice";
 import { createProject } from "../_services/createProject";
 import { setTitle } from "../redux/reducers/projectOptions";
-import {
-  STARTING_POINTS,
-  MOBILE_STARTING_POINTS,
-  type StartingPoint,
-} from "../config/startingPoints";
+import { type StartingPoint } from "../config/startingPoints";
+import { type TemplateDefinition } from "../config/templates";
 import { ensureProjectCompletionNotificationPreference } from "../helpers/notificationPreferences";
+import { communityDtoToTemplateDefinition } from "../helpers/communityTemplateAdapter";
+import {
+  fetchPublicTemplates,
+  fetchTemplateBySlug,
+} from "../_services/templatesApi";
+import TemplateArtwork from "./templates/TemplateArtwork";
+import MarketingFooter from "./MarketingFooter";
 
 // FAQ Data
 const faqData = [
@@ -194,6 +206,47 @@ const CommunityCard = ({
   );
 };
 
+const HomeTemplateCard = ({
+  template,
+  href,
+  onOpen,
+}: {
+  template: TemplateDefinition;
+  href: string;
+  onOpen: (href: string) => void;
+}) => {
+  return (
+    <article className="group space-y-3">
+      <button
+        type="button"
+        onClick={() => onOpen(href)}
+        className="relative block w-full cursor-pointer overflow-hidden rounded-md text-left"
+      >
+        <TemplateArtwork
+          template={template}
+          className="aspect-[1.45/1] transition-transform duration-300 group-hover:scale-[1.01]"
+        />
+        <div className="absolute inset-0 hidden items-center justify-center bg-black/25 opacity-0 transition-opacity duration-200 group-hover:opacity-100 md:flex">
+          <span className="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-medium text-black shadow-lg">
+            More Details
+          </span>
+        </div>
+      </button>
+      <div className="flex items-start justify-between gap-3 px-1">
+        <div className="min-w-0">
+          <button
+            type="button"
+            onClick={() => onOpen(href)}
+            className="line-clamp-2 cursor-pointer text-left text-xs font-semibold text-white transition-colors hover:text-white/80"
+          >
+            {template.title}
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+};
+
 // FAQ Item Component
 const FAQItem = ({
   question,
@@ -255,27 +308,50 @@ const Hero = () => {
   const [framework] = useState("React");
   const [cssLibrary] = useState("Tailwind CSS");
   const [memory] = useState("");
-  const allowedModels = new Set(["claude-opus-4.6", "claude-sonnet-4.5"]);
+  const allowedModels = new Set(["claude-opus-4.6", "claude-sonnet-4.6"]);
   const [selectedModel, setSelectedModel] = useState(() => {
-    if (typeof window === "undefined") return "claude-sonnet-4.5";
+    if (typeof window === "undefined") return "claude-sonnet-4.6";
     const stored = sessionStorage.getItem("model");
     return stored && allowedModels.has(stored)
       ? stored
-      : "claude-sonnet-4.5";
+      : "claude-sonnet-4.6";
   });
   const [selectedStartingPoint, setSelectedStartingPoint] =
     useState<StartingPoint | null>(null);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [previewDropdownOpen, setPreviewDropdownOpen] = useState(false);
+  const [mobileOptionsOpen, setMobileOptionsOpen] = useState(false);
   const [landingPreview, setLandingPreview] = useState<"web" | "mobile">(
     "web"
   );
+  const [communityWebTemplates, setCommunityWebTemplates] = useState<
+    TemplateDefinition[]
+  >([]);
+
+  useEffect(() => {
+    if (landingPreview !== "web") {
+      setCommunityWebTemplates([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchPublicTemplates().then((rows) => {
+      if (cancelled) return;
+      setCommunityWebTemplates(rows.map(communityDtoToTemplateDefinition));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [landingPreview]);
+  const [selectedTemplateCategory, setSelectedTemplateCategory] =
+    useState<string>("All");
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const micStartPendingRef = useRef(false);
+  const appliedTemplateSlugRef = useRef<string | null>(null);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const dispatch = useDispatch();
 
@@ -429,10 +505,43 @@ const Hero = () => {
     [landingPreview]
   );
 
-  const activeStartingPoints = useMemo(
+  const activeTemplateCatalog = useMemo((): TemplateDefinition[] => {
+    if (landingPreview === "mobile") {
+      return [];
+    }
+    return communityWebTemplates;
+  }, [landingPreview, communityWebTemplates]);
+
+  const templateCategoryOptions = useMemo(
     () =>
-      landingPreview === "mobile" ? MOBILE_STARTING_POINTS : STARTING_POINTS,
-    [landingPreview]
+      landingPreview === "mobile"
+        ? [
+            "All",
+            ...Array.from(
+              new Set(activeTemplateCatalog.map((template) => template.label))
+            ),
+          ]
+        : [
+            "All",
+            ...Array.from(
+              new Set(activeTemplateCatalog.map((template) => template.category)),
+            ),
+          ],
+    [activeTemplateCatalog, landingPreview]
+  );
+
+  const visibleLandingTemplates = useMemo(
+    () =>
+      activeTemplateCatalog
+        .filter((template) =>
+          selectedTemplateCategory === "All"
+            ? true
+            : landingPreview === "mobile"
+              ? template.label === selectedTemplateCategory
+              : template.category === selectedTemplateCategory
+        )
+        .slice(0, 6),
+    [activeTemplateCatalog, landingPreview, selectedTemplateCategory]
   );
 
   const subHeadline =
@@ -468,14 +577,44 @@ const Hero = () => {
     };
   }, [isAuthenticated.value, email?.value]);
 
-  const startingPointsHint =
+  const browseAllHref =
     landingPreview === "mobile"
-      ? "Pick a mobile app template to prefill the prompt."
-      : "Pick a launch template to prefill the prompt.";
+      ? "/templates?runtime=mobile"
+      : "/templates?runtime=web";
+
+  const getTemplateCategoryIcon = useCallback((category: string) => {
+    switch (category) {
+      case "Landing Pages":
+        return <IoBrowsersOutline className="text-sm" />;
+      case "Apps & Games":
+        return <IoAppsOutline className="text-sm" />;
+      case "Components":
+        return <IoGridOutline className="text-sm" />;
+      case "Dashboards":
+        return <IoStatsChartOutline className="text-sm" />;
+      case "Mobile Apps":
+      case "Fitness App":
+      case "Food Delivery":
+      case "Wallet App":
+      case "Social App":
+      case "Travel App":
+      case "Learning App":
+        return <IoPhonePortraitOutline className="text-sm" />;
+      default:
+        return null;
+    }
+  }, []);
+
+  const openTemplate = useCallback(
+    (href: string) => {
+      router.push(href);
+    },
+    [router]
+  );
 
   const modelOptions = [
     { name: "claude-opus-4.6", display: "Claude Opus 4.6", scale: false },
-    { name: "claude-sonnet-4.5", display: "Claude Sonnet 4.5", scale: false },
+    { name: "claude-sonnet-4.6", display: "Claude Sonnet 4.6", scale: false },
   ];
   const selectedModelOption = modelOptions.find(
     (option) => option.name === selectedModel
@@ -525,6 +664,7 @@ const Hero = () => {
     setIsDeleting(false);
     setPlaceholder("");
     setSelectedStartingPoint(null);
+    setSelectedTemplateCategory("All");
   }, [landingPreview]);
 
   // Close dropdown when clicking outside
@@ -550,7 +690,45 @@ const Hero = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const templateSlug = searchParams.get("template");
+    if (!templateSlug || appliedTemplateSlugRef.current === templateSlug) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const dto = await fetchTemplateBySlug(templateSlug);
+      if (cancelled || !dto) return;
+
+      const template = communityDtoToTemplateDefinition(dto);
+      const matchingStartingPoint = {
+        id: template.id,
+        label: template.label,
+        description: template.description,
+        prompt: template.prompt,
+      };
+
+      appliedTemplateSlugRef.current = templateSlug;
+      setLandingPreview(template.runtime);
+      setSelectedStartingPoint(matchingStartingPoint);
+      setSelectedTemplateCategory(template.category);
+      setInput(template.prompt);
+
+      requestAnimationFrame(() => {
+        document
+          .getElementById("builder")
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
+
   const handleAttachClick = () => {
+    setMobileOptionsOpen(false);
     if (!isAuthenticated.value) {
       router.push("/login");
     } else {
@@ -810,6 +988,7 @@ const Hero = () => {
         startingPoint: selectedStartingPoint?.id || null,
         previewRuntime: landingPreview,
         platform: landingPreview,
+        isPublic: false,
       };
 
       const userMessage: Message = {
@@ -833,6 +1012,7 @@ const Hero = () => {
         model: selectedModel,
         startingPoint: selectedStartingPoint?.id || null,
         previewRuntime: landingPreview,
+        isPublic: false,
       };
       sessionStorage.setItem(
         `superblocksMessage_${projectId}`,
@@ -1114,7 +1294,7 @@ const Hero = () => {
       <NavigationBanner />
 
       {/* Header */}
-      <Header />
+      <Header withBannerOffset />
 
       {/* Figma Modal */}
       <AnimatePresence>
@@ -1295,13 +1475,16 @@ const Hero = () => {
       </AnimatePresence>
 
       {/* Hero and Input Section */}
-      <section className="flex w-full max-w-3xl mx-auto mt-[6%] flex-col items-center justify-center px-4 sm:px-0">
+      <section
+        id="builder"
+        className="mx-auto mt-16 flex w-full max-w-6xl flex-col items-center justify-center px-4 sm:mt-24 sm:px-0 lg:mt-28"
+      >
         {/* Introduce  */}
         <motion.div
           initial="hidden"
           animate="visible"
           variants={agentIntroVariants}
-          className="relative mb-2 flex w-full max-w-full items-center justify-between gap-2 overflow-hidden rounded-2xl border border-[#2a2a2b] bg-stone-50/10 px-3 py-2 text-white backdrop-blur-3xl max-md:mt-[10%] sm:w-auto sm:justify-center sm:rounded-3xl sm:px-2 sm:py-1"
+          className="relative mb-2 flex w-full max-w-full items-center justify-between gap-2 overflow-hidden rounded-2xl border border-[#2a2a2b] bg-stone-50/10 px-2.5 py-1.5 text-white backdrop-blur-3xl max-md:mt-4 sm:w-auto sm:justify-center sm:rounded-3xl sm:px-2 sm:py-1"
         >
           <div className="flex min-w-0 items-center gap-2">
             <CiMobile1 className="shrink-0 text-base text-[#4F92E1] sm:text-lg" />
@@ -1338,9 +1521,9 @@ const Hero = () => {
           initial="hidden"
           animate="visible"
           variants={mainContentVariants}
-          className="text-center space-y-5 mt-5 mb-8"
+          className="mt-5 mb-10 space-y-5 text-center sm:mt-6 sm:mb-12"
         >
-          <h1 className="text-xl  sm:text-6xl text-balance font-bold text-white tracking-tight leading-tight">
+          <h1 className="font-[insSerifIt] text-xl text-balance font-semibold leading-tight tracking-tight text-white sm:text-6xl">
             What would you like to build?
           </h1>
           <p className="text-sm sm:text-lg text-[#b1b1b1] font-medium max-w-2xl mx-auto">
@@ -1351,7 +1534,7 @@ const Hero = () => {
           initial="hidden"
           animate="visible"
           variants={inputBoxVariants}
-          className="w-full space-y-4 max-md:px-4"
+          className="mx-auto w-full max-w-[780px] space-y-4 max-md:px-4"
         >
           {needsUpgradePending && (
             <motion.div
@@ -1385,7 +1568,7 @@ const Hero = () => {
             </motion.button>
           )}
           {/*  TEXT INPUT (FIRST) */}
-          <div className="bg-[#141415] relative rounded-xl p-4 flex flex-col items-start justify-center shadow-lg sm:min-h-[150px] md:min-h-[250px] max-h-[250px] w-full">
+          <div className="bg-[#141415] relative rounded-xl p-4 flex flex-col items-start justify-center shadow-lg sm:min-h-[120px] md:min-h-[180px] max-h-[200px] w-full">
             <BorderBeam
               duration={6}
               delay={3}
@@ -1424,14 +1607,22 @@ const Hero = () => {
 
             {/* Action Buttons */}
             <div className="flex w-full items-center justify-between gap-2">
-              <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pr-1 md:gap-2">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 pr-1 md:flex-nowrap md:gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMobileOptionsOpen(true)}
+                  className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-[#b1b1b1] transition-colors hover:bg-[#2a292c] md:hidden"
+                  title="More options"
+                >
+                  <FaPlus />
+                </button>
                 <button
                   disabled={
                     loading ||
                     (needsUpgrade as boolean)
                   }
                   onClick={handleAttachClick}
-                  className="cursor-pointer p-2 rounded-md text-xs font-sans font-medium gap-x-1 flex justify-center items-center transition-colors text-[#b1b1b1] hover:bg-[#2a292c]"
+                  className="hidden shrink-0 cursor-pointer items-center justify-center gap-x-1 rounded-md p-2 text-xs font-sans font-medium text-[#b1b1b1] transition-colors hover:bg-[#2a292c] md:flex"
                   title="Attach PNG or JPEG"
                 >
                   <FaPaperclip />
@@ -1450,11 +1641,11 @@ const Hero = () => {
                 </button> */}
 
                 {/* Model Dropdown */}
-                <div className="relative" ref={modelDropdownRef}>
+                <div className="relative z-20 hidden md:block" ref={modelDropdownRef}>
                   <button
                     disabled={loading}
                     onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-                    className="cursor-pointer text-[#71717A] hover:text-[#b1b1b1] hover:bg-[#1c1c1d] px-3 py-1.5 rounded-full text-xs font-sans font-medium gap-x-1 flex justify-center items-center hover:text-white transition-colors min-w-[70px] max-w-[140px] md:max-w-none"
+                    className="shrink-0 cursor-pointer text-[#71717A] hover:text-[#b1b1b1] hover:bg-[#1c1c1d] px-2 py-1 rounded-full text-xs font-sans font-medium gap-x-1 flex justify-center items-center hover:text-white transition-colors min-w-[128px] max-w-[168px] md:max-w-none"
                   >
                     <span className="truncate md:hidden">
                       {compactModelLabel}
@@ -1493,11 +1684,11 @@ const Hero = () => {
                 </div>
 
                 {/* Landing Preview Dropdown */}
-                <div className="relative" ref={previewDropdownRef}>
+                <div className="relative z-20 hidden md:block" ref={previewDropdownRef}>
                   <button
                     disabled={loading}
                     onClick={() => setPreviewDropdownOpen(!previewDropdownOpen)}
-                    className="cursor-pointer text-[#71717A] hover:text-[#b1b1b1] hover:bg-[#1c1c1d] px-3 py-1.5 rounded-full text-xs font-sans font-medium gap-x-1 flex justify-center items-center hover:text-white transition-colors min-w-[70px]"
+                    className="shrink-0 cursor-pointer text-[#71717A] hover:text-[#b1b1b1] hover:bg-[#1c1c1d] px-2 py-1 rounded-full text-xs font-sans font-medium gap-x-1 flex justify-center items-center hover:text-white transition-colors min-w-[84px]"
                   >
                     {landingPreview === "web" ? (
                       <CiLaptop className="text-sm" />
@@ -1665,72 +1856,223 @@ const Hero = () => {
                 )}
               </div>
             </div>
-          </div>
 
-          {/* Starting Points */}
-          <div className="mt-8 w-full">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-[#4a90e2] font-semibold">
-                  Starting Points
-                </p>
-                <p className="text-[11px] text-[#8b8b90]">
-                  {startingPointsHint}
-                </p>
-              </div>
-              {selectedStartingPoint && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedStartingPoint(null)}
-                  className="text-[11px] text-[#9b9ba3] hover:text-white transition-colors"
+            <AnimatePresence>
+              {mobileOptionsOpen ? (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[120] bg-black/65 backdrop-blur-sm md:hidden"
+                  onClick={() => setMobileOptionsOpen(false)}
                 >
-                  Clear
-                </button>
-              )}
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {activeStartingPoints.map((startingPoint) => {
-                const isActive = selectedStartingPoint?.id === startingPoint.id;
-                return (
-                  <button
-                    key={startingPoint.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedStartingPoint(startingPoint);
-                      setInput(startingPoint.prompt);
-                    }}
-                    className={`text-left rounded-xl border px-4 py-3 transition-all ${
-                      isActive
-                        ? "border-[#4a90e2] bg-[#182233] text-white shadow-[0_0_0_1px_rgba(74,144,226,0.4)]"
-                        : "border-[#2a2a2b] bg-[#141415] text-[#c5c5cb] hover:border-[#3b3b3c]"
-                    }`}
+                  <motion.div
+                    initial={{ opacity: 0, y: 24 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 24 }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                    className="absolute inset-x-4 bottom-6 rounded-[28px] border border-white/10 bg-[#111214] p-5 shadow-2xl"
+                    onClick={(event) => event.stopPropagation()}
                   >
-                    <div className="text-sm font-semibold text-white">
-                      {startingPoint.label}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-white">
+                          Build options
+                        </p>
+                        <p className="mt-1 text-xs text-white/50">
+                          Select your model, output type, and project privacy.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setMobileOptionsOpen(false)}
+                        className="rounded-full border border-white/10 px-2 py-1 text-xs text-white/65 transition hover:border-white/20 hover:text-white"
+                      >
+                        Done
+                      </button>
                     </div>
-                    <div className="text-[11px] text-[#9b9ba3] mt-1">
-                      {startingPoint.description}
+
+                    <button
+                      type="button"
+                      onClick={handleAttachClick}
+                      className="mt-5 flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left transition hover:border-white/20 hover:bg-white/[0.05]"
+                    >
+                      <span className="flex items-center gap-3">
+                        <FaPaperclip className="text-sm text-white/70" />
+                        <span className="text-sm font-medium text-white">
+                          Attach image
+                        </span>
+                      </span>
+                      <span className="text-xs text-white/45">PNG or JPEG</span>
+                    </button>
+
+                    <div className="mt-5 space-y-4">
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/40">
+                          Model
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {modelOptions.map((model) => (
+                            <button
+                              key={model.name}
+                              type="button"
+                              onClick={() => setSelectedModel(model.name)}
+                              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                selectedModel === model.name
+                                  ? "border-[#4a90e2] bg-[#172234] text-white"
+                                  : "border-white/10 bg-white/[0.03] text-white/60 hover:border-white/20 hover:text-white"
+                              }`}
+                            >
+                              {model.display}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/40">
+                          Output
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {landingPreviewOptions.map((option) => (
+                            <button
+                              key={option.name}
+                              type="button"
+                              onClick={() => setLandingPreview(option.name)}
+                              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                landingPreview === option.name
+                                  ? "border-[#4a90e2] bg-[#172234] text-white"
+                                  : "border-white/10 bg-white/[0.03] text-white/60 hover:border-white/20 hover:text-white"
+                              }`}
+                            >
+                              {option.icon}
+                              {option.display}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                  </button>
-                );
-              })}
-            </div>
+                  </motion.div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
           </div>
 
         </motion.div>
-      </section>
 
-      {/* Arrow */}
-      <section className="justify-center items-end flex w-full h-[10vh]">
+        {/* Starting Points */}
         <motion.div
           initial="hidden"
           animate="visible"
           variants={inputBoxVariants}
-          className="w-full space-y-4 flex justify-center items-end"
+          className="mx-auto mt-5 flex w-full max-w-[780px] flex-wrap items-center justify-center gap-2 max-md:px-4"
         >
-          <IoIosArrowDown className="text-[#6c6c6f] animate-bounce" />
+          {(landingPreview === "mobile"
+            ? [
+                { label: "Fitness tracker app", prompt: "Build a fitness tracker mobile app with workout logging, progress charts, and a clean dark UI" },
+                { label: "Food delivery app", prompt: "Create a food delivery mobile app with restaurant listings, cart, and order tracking UI" },
+                { label: "Wallet & finance app", prompt: "Design a fintech wallet mobile app with balance cards, transaction history, and send/receive UI" },
+                { label: "Social media app", prompt: "Build a social media mobile app with feed, stories, profile pages, and messaging UI" },
+                { label: "Travel booking app", prompt: "Create a travel booking mobile app with search, listings, booking flow, and itinerary UI" },
+              ]
+            : [
+                { label: "SaaS landing page", prompt: "Build a modern SaaS landing page with hero, features grid, pricing table, testimonials, and CTA sections" },
+                { label: "Portfolio website", prompt: "Create a personal portfolio website with about, projects gallery, skills, and contact sections" },
+                { label: "Dashboard UI", prompt: "Build an analytics dashboard with sidebar navigation, stat cards, charts, and a data table" },
+                { label: "E-commerce storefront", prompt: "Create an e-commerce storefront with product grid, filters, product detail page, and shopping cart" },
+                { label: "Blog / magazine", prompt: "Build a blog website with featured post hero, article cards grid, categories, and newsletter signup" },
+              ]
+          ).map((sp) => (
+            <button
+              key={sp.label}
+              type="button"
+              onClick={() => {
+                setInput(sp.prompt);
+                setSelectedStartingPoint(null);
+              }}
+              className="cursor-pointer rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-white/55 transition-colors hover:border-white/25 hover:bg-white/[0.06] hover:text-white/80"
+            >
+              {sp.label}
+            </button>
+          ))}
+        </motion.div>
+
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          variants={inputBoxVariants}
+          className="mt-20 w-full max-w-[1240px] md:mt-24"
+        >
+          <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="font-[insSerifIt] text-2xl font-semibold text-white sm:text-3xl">
+                  Start with a template
+                </h2>
+              </div>
+
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex-wrap lg:justify-end">
+                {templateCategoryOptions.map((category) => (
+                  <button
+                    key={category}
+                    type="button"
+                    onClick={() => setSelectedTemplateCategory(category)}
+                    className={`inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      selectedTemplateCategory === category
+                        ? "border-[#4a90e2] bg-[#172234] text-white"
+                        : "border-white/10 bg-white/[0.03] text-white/60 hover:border-white/20 hover:text-white"
+                    }`}
+                  >
+                    {category !== "All" ? getTemplateCategoryIcon(category) : null}
+                    {category}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => router.push(browseAllHref)}
+                  className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-medium text-black transition hover:bg-white/90"
+                >
+                  Browse All
+                  <IoChevronForward className="text-xs" />
+                </button>
+              </div>
+            </div>
+
+            {visibleLandingTemplates.length > 0 ? (
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {visibleLandingTemplates.map((template) => (
+                  <div key={template.slug} className="min-w-0">
+                    <HomeTemplateCard
+                      template={template}
+                      href={`/templates/${template.slug}`}
+                      onOpen={openTemplate}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="py-10 text-center text-xs leading-relaxed text-white/45">
+                {landingPreview === "mobile"
+                  ? "Published templates are web apps. Switch to Web preview to browse the gallery."
+                  : "No templates in the gallery yet. Publish a public web project to list it here."}
+              </p>
+            )}
+          </div>
         </motion.div>
       </section>
+
+      {!isAuthenticated.value ? (
+        <section className="justify-center items-end flex w-full h-[10vh]">
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={inputBoxVariants}
+            className="w-full space-y-4 flex justify-center items-end"
+          >
+            <IoIosArrowDown className="text-[#6c6c6f] animate-bounce" />
+          </motion.div>
+        </section>
+      ) : null}
 
       {/* From the community */}
       {/* <section
@@ -1780,30 +2122,32 @@ const Hero = () => {
         </motion.div>
       </section> */}
 
-      {/* Pricing */}
-      <section
-        id="pricing"
-        className="justify-center max-md:px-4 items-center flex flex-col w-full max-w-4xl mx-auto py-12 sm:py-16"
-      >
-        <motion.div
-          initial="hidden"
-          animate="visible"
-          variants={mainContentVariants}
-          className="w-full"
-        >
-          <div className="text-center mb-8 sm:mb-10">
-            <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">
-              Simple, Transparent Pricing
-            </h2>
-            <p className="text-[#b1b1b1] text-sm sm:text-base max-w-2xl mx-auto leading-snug">
-              Choose the plan that fits your needs. Start free, upgrade when
-              you&apos;re ready to scale.
-            </p>
-          </div>
+      {!isAuthenticated.value ? (
+        <>
+          {/* Pricing */}
+          <section
+            id="pricing"
+            className="justify-center max-md:px-4 items-center flex flex-col w-full max-w-4xl mx-auto py-12 sm:py-16"
+          >
+            <motion.div
+              initial="hidden"
+              animate="visible"
+              variants={mainContentVariants}
+              className="w-full"
+            >
+              <div className="text-center mb-8 sm:mb-10">
+                <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">
+                  Simple, Transparent Pricing
+                </h2>
+                <p className="text-[#b1b1b1] text-sm sm:text-base max-w-2xl mx-auto leading-snug">
+                  Choose the plan that fits your needs. Start free, upgrade when
+                  you&apos;re ready to scale.
+                </p>
+              </div>
 
-          <div className="flex justify-center items-center mx-auto">
-            {/* Free Plan */}
-            {/* <motion.div
+              <div className="flex justify-center items-center mx-auto">
+                {/* Free Plan */}
+                {/* <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.1 }}
@@ -1902,158 +2246,139 @@ const Hero = () => {
               </div>
             </motion.div> */}
 
-            {/* Scale Plan */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.2 }}
-              className="bg-[#141415] border border-[#4a90e2] rounded-xl p-5 sm:p-6 hover:border-[#5ba0f2] transition-all duration-300 relative max-w-md w-full"
-            >
-              <div className="absolute -top-2.5 left-1/2 transform -translate-x-1/2">
-                <div className="bg-[#4a90e2] text-white px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-medium">
-                  Most Popular
-                </div>
-              </div>
+                {/* Scale Plan */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.2 }}
+                  className="bg-[#141415] border border-[#4a90e2] rounded-xl p-5 sm:p-6 hover:border-[#5ba0f2] transition-all duration-300 relative max-w-md w-full"
+                >
+                  <div className="absolute -top-2.5 left-1/2 transform -translate-x-1/2">
+                    <div className="bg-[#4a90e2] text-white px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-medium">
+                      Most Popular
+                    </div>
+                  </div>
 
-              <div className="mb-4 pt-1">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <svg
-                    className="w-4 h-4 text-[#4a90e2] shrink-0"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
+                  <div className="mb-4 pt-1">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <svg
+                        className="w-4 h-4 text-[#4a90e2] shrink-0"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M9.664 1.319a.75.75 0 01.672 0 41.059 41.059 0 018.198 5.424.75.75 0 01-.254 1.285 31.372 31.372 0 00-7.86 3.83.75.75 0 01-.84 0 31.508 31.508 0 00-2.08-1.287V9.394c0-.244.116-.463.302-.592a35.504 35.504 0 013.305-2.033.75.75 0 00-.714-1.319 37 37 0 00-3.446 2.12A2.216 2.216 0 006 9.393v.38a31.293 31.293 0 00-4.28-1.746.75.75 0 01-.254-1.285 41.059 41.059 0 018.198-5.424zM6 11.459a29.848 29.848 0 00-2.455-1.158 41.029 41.029 0 00-.39 3.114.75.75 0 00.419.74c.528.256 1.046.53 1.554.82-.21-.899-.455-1.746-.721-2.517zm.286 1.961a.75.75 0 01.848.06 28.424 28.424 0 014.132 3.624 28.731 28.731 0 01-2.993 1.454.75.75 0 01-.848-.06 28.424 28.424 0 01-4.132-3.624A28.731 28.731 0 016.286 13.42zm7.428-4.673A47.394 47.394 0 0117 6.394v3.114c-.855.31-1.82.602-2.286.77a.75.75 0 01-.848-.06 28.424 28.424 0 00-4.132-3.624A28.731 28.731 0 0113.714 8.747z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                      <h3 className="text-lg font-semibold text-white">Scale</h3>
+                    </div>
+                    <div className="text-2xl sm:text-3xl font-bold text-white mb-1">
+                      ${scalePriceDollars}
+                      <span className="text-base sm:text-lg font-normal text-[#71717A]">
+                        /month
+                      </span>
+                    </div>
+                    <p className="text-[#b1b1b1] text-xs sm:text-sm leading-snug">
+                      Expand your build capacity with 100 messages every month
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isAuthenticated.value) {
+                        router.push("/login");
+                      } else {
+                        dispatch(setPricingModalOpen(true));
+                      }
+                    }}
+                    className="w-full cursor-pointer bg-white text-black py-2.5 rounded-lg font-medium text-sm hover:bg-gray-100 transition-colors mb-4"
                   >
-                    <path
-                      fillRule="evenodd"
-                      d="M9.664 1.319a.75.75 0 01.672 0 41.059 41.059 0 018.198 5.424.75.75 0 01-.254 1.285 31.372 31.372 0 00-7.86 3.83.75.75 0 01-.84 0 31.508 31.508 0 00-2.08-1.287V9.394c0-.244.116-.463.302-.592a35.504 35.504 0 013.305-2.033.75.75 0 00-.714-1.319 37 37 0 00-3.446 2.12A2.216 2.216 0 006 9.393v.38a31.293 31.293 0 00-4.28-1.746.75.75 0 01-.254-1.285 41.059 41.059 0 018.198-5.424zM6 11.459a29.848 29.848 0 00-2.455-1.158 41.029 41.029 0 00-.39 3.114.75.75 0 00.419.74c.528.256 1.046.53 1.554.82-.21-.899-.455-1.746-.721-2.517zm.286 1.961a.75.75 0 01.848.06 28.424 28.424 0 014.132 3.624 28.731 28.731 0 01-2.993 1.454.75.75 0 01-.848-.06 28.424 28.424 0 01-4.132-3.624A28.731 28.731 0 016.286 13.42zm7.428-4.673A47.394 47.394 0 0117 6.394v3.114c-.855.31-1.82.602-2.286.77a.75.75 0 01-.848-.06 28.424 28.424 0 00-4.132-3.624A28.731 28.731 0 0113.714 8.747z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <h3 className="text-lg font-semibold text-white">Scale</h3>
-                </div>
-                <div className="text-2xl sm:text-3xl font-bold text-white mb-1">
-                  ${scalePriceDollars}
-                  <span className="text-base sm:text-lg font-normal text-[#71717A]">
-                    /month
-                  </span>
-                </div>
-                <p className="text-[#b1b1b1] text-xs sm:text-sm leading-snug">
-                  Expand your build capacity with 100 messages every month
-                </p>
-              </div>
+                    Upgrade to Scale
+                  </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isAuthenticated.value) {
-                    router.push("/login");
-                  } else {
-                    dispatch(setPricingModalOpen(true));
-                  }
-                }}
-                className="w-full cursor-pointer bg-white text-black py-2.5 rounded-lg font-medium text-sm hover:bg-gray-100 transition-colors mb-4"
-              >
-                Upgrade to Scale
-              </button>
+                  <div className="mb-2">
+                    <p className="text-[#71717A] text-[10px] sm:text-xs font-medium uppercase tracking-wide">
+                      Benefits
+                    </p>
+                  </div>
 
-              <div className="mb-2">
-                <p className="text-[#71717A] text-[10px] sm:text-xs font-medium uppercase tracking-wide">
-                  Benefits
-                </p>
-              </div>
-
-              <div className="space-y-2.5">
-                <div className="flex items-start gap-2.5">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
-                  <span className="text-white text-xs sm:text-sm leading-snug">
-                    100 messages / month
-                  </span>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
-                  <span className="text-white text-xs sm:text-sm leading-snug">
-                    Priority customer support with faster response times
-                  </span>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
-                  <span className="text-white text-xs sm:text-sm leading-snug">
-                    Every user starts on Free with 5 prompts
-                  </span>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
-                  <span className="text-white text-xs sm:text-sm leading-snug">
-                    Manage billing directly in Stripe
-                  </span>
-                </div>
+                  <div className="space-y-2.5">
+                    <div className="flex items-start gap-2.5">
+                      <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
+                      <span className="text-white text-xs sm:text-sm leading-snug">
+                        100 messages / month
+                      </span>
+                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
+                      <span className="text-white text-xs sm:text-sm leading-snug">
+                        Priority customer support with faster response times
+                      </span>
+                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
+                      <span className="text-white text-xs sm:text-sm leading-snug">
+                        Every user starts on Free with 5 prompts
+                      </span>
+                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <span className="w-1.5 h-1.5 bg-white rounded-full flex-shrink-0 mt-1.5" />
+                      <span className="text-white text-xs sm:text-sm leading-snug">
+                        Manage billing directly in Stripe
+                      </span>
+                    </div>
+                  </div>
+                </motion.div>
               </div>
             </motion.div>
-          </div>
-        </motion.div>
-      </section>
+          </section>
 
-      {/* FAQ */}
-      <section
-        id="faq"
-        className="justify-center items-center flex flex-col w-full max-w-4xl mx-auto py-20"
+          {/* FAQ */}
+          <section
+            id="faq"
+            className="justify-center items-center flex flex-col w-full max-w-4xl mx-auto py-20"
+          >
+            <motion.div
+              initial="hidden"
+              animate="visible"
+              variants={mainContentVariants}
+              className="w-full"
+            >
+              <div className="text-center mb-12">
+                <h1 className="relative z-1 text-lg md:text-4xl  bg-clip-text text-transparent bg-gradient-to-b from-neutral-200 to-neutral-600  text-center font-sans font-semibold">
+                  Frequently Asked Questions
+                </h1>
+                <p className="text-[#b1b1b1] text-sm sm:text-base text-balance sm:max-w-2xl mx-auto">
+                  Everything you need to know about building your applications with
+                  Superblocks
+                </p>
+              </div>
+
+              <div className="space-y-4 justify-center items-center flex flex-col">
+                {faqData.map((faq, index) => (
+                  <FAQItem
+                    key={index}
+                    question={faq.question}
+                    answer={faq.answer}
+                    index={index}
+                  />
+                ))}
+              </div>
+            </motion.div>
+          </section>
+        </>
+      ) : null}
+
+      <motion.div
+        initial="hidden"
+        animate="visible"
+        variants={footerVariants}
       >
-        <motion.div
-          initial="hidden"
-          animate="visible"
-          variants={mainContentVariants}
-          className="w-full"
-        >
-          <div className="text-center mb-12">
-            <h1 className="relative z-1 text-lg md:text-4xl  bg-clip-text text-transparent bg-gradient-to-b from-neutral-200 to-neutral-600  text-center font-sans font-semibold">
-              Frequently Asked Questions
-            </h1>
-            <p className="text-[#b1b1b1] text-sm sm:text-base text-balance sm:max-w-2xl mx-auto">
-              Everything you need to know about building your applications with
-              Superblocks
-            </p>
-          </div>
-
-          <div className="space-y-4 justify-center items-center flex flex-col">
-            {faqData.map((faq, index) => (
-              <FAQItem
-                key={index}
-                question={faq.question}
-                answer={faq.answer}
-                index={index}
-              />
-            ))}
-          </div>
-        </motion.div>
-      </section>
-
-      {/* Footer */}
-      <section>
-        <motion.div
-          initial="hidden"
-          animate="visible"
-          variants={footerVariants}
-          className="flex justify-center items-end w-full flex-col"
-        >
-          {/* Line */}
-          <div className="w-full justify-center items-center flex flex-col">
-            <div className="pt-5 border-t border-[#1c1c1d] w-full max-w-3xl self-center snap-center object-center" />
-
-            {/* Rights and Social Icons */}
-            <div className="w-full max-w-3xl self-center flex justify-center items-center pb-4">
-              <span className="text-[#71717A] text-sm">
-                © {new Date().getFullYear()} Superblocks. All rights reserved.
-              </span>
-            </div>
-          </div>
-
-          <div className="text-center w-full pt-25">
-            <MorphingText
-              texts={["Superblocks", "Vibe coding platform"]}
-              className="text-6xl w-full sm:text-8xl lg:text-9xl font-[insSerifIt] text-white"
-            />
-          </div>
-        </motion.div>
-      </section>
+        <MarketingFooter />
+      </motion.div>
     </main>
   );
 };

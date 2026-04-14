@@ -27,11 +27,44 @@ export const PREVIEW_SDK_54_CORE_DEPENDENCIES: PreviewSnackDependencies = {
   "react-native": "0.81.5",
   "react-dom": "19.1.0",
   "react-native-web": "^0.21.0",
+  "expo-linear-gradient": "~14.0.2",
 };
 
 export const DEFAULT_PREVIEW_SNACK_DEPENDENCIES: PreviewSnackDependencies = {
   ...PREVIEW_SDK_54_CORE_DEPENDENCIES,
 };
+
+/** npm package names are lowercase; reject LLM hallucinations like "Montmartre" or "Spa". */
+export function isValidNpmPackageNameForSnack(name: string): boolean {
+  const n = name.trim();
+  if (!n || n.length > 214) return false;
+  if (/[A-Z]/.test(n)) return false;
+  if (n.startsWith(".") || n.startsWith("-") || n.startsWith("_")) return false;
+  if (n.startsWith("@")) {
+    const slash = n.indexOf("/", 1);
+    if (slash === -1) return false;
+    const scope = n.slice(1, slash);
+    const pkg = (n.slice(slash + 1).split("/")[0] ?? "").trim();
+    if (!scope || !pkg) return false;
+    return (
+      /^[a-z0-9-~][a-z0-9._-]*$/.test(scope) && /^[a-z0-9][a-z0-9._-]*$/.test(pkg)
+    );
+  }
+  return /^[a-z0-9][a-z0-9._-]*$/.test(n);
+}
+
+/** Web-only tooling must not be sent to Snack (e.g. next → snackager 504 / wrong graph). */
+export const MOBILE_SNACK_BLOCKED_DEPENDENCIES = new Set<string>([
+  "next",
+  "vite",
+  "webpack",
+  "nuxt",
+  "astro",
+  "svelte",
+  "react-scripts",
+  "@sveltejs/kit",
+  "@vitejs/plugin-react",
+]);
 
 const DEFAULT_PACKAGE_JSON = `{
   "name": "superblocks-mobile-preview-app",
@@ -46,7 +79,8 @@ const DEFAULT_PACKAGE_JSON = `{
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-dom": "19.1.0",
-    "react-native-web": "^0.21.0"
+    "react-native-web": "^0.21.0",
+    "expo-linear-gradient": "~14.0.2"
   }
 }`;
 

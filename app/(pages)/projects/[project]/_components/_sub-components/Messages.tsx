@@ -2,7 +2,11 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { FaCode, FaFilePdf } from "react-icons/fa";
 import Image from "next/image";
-import { LuLoaderCircle } from "react-icons/lu";
+import {
+  LuCheck,
+  LuCornerUpLeft,
+  LuLoaderCircle,
+} from "react-icons/lu";
 import { IoClose } from "react-icons/io5";
 
 import { useSelector, useDispatch } from "react-redux";
@@ -34,9 +38,21 @@ import {
   dbMessageToUiMessage,
   syncTodosFromHydratedMessages,
 } from "@/app/_services/agentMessageNormalize";
-import { updateSpecificFile } from "@/app/redux/reducers/projectFiles";
+import {
+  clearAllFiles,
+  updateSpecificFile,
+  updateSpecificFilesBatch,
+} from "@/app/redux/reducers/projectFiles";
+import { refreshPreview, setStreamActive, setUrl } from "@/app/redux/reducers/projectOptions";
 import { FaChevronDown, FaChevronUp } from "react-icons/fa";
+import { API } from "@/app/config/publicEnv";
 import { useGetChatMessages } from "@/app/_services/useChatOperations";
+import {
+  dedupeFileWrites,
+  extractFileWritesFromSnapshot,
+} from "@/app/_services/fileUpdatesMobile";
+import { fetchProjectSnapshot } from "@/app/helpers/fetchProjectSnapshot";
+
 // Collapsible Image Component
 const CollapsibleImage = ({ src, alt }: { src: string; alt?: string }) => {
   const [isExpanded, setIsExpanded] = useState(true); // Default to open
@@ -95,7 +111,8 @@ function CollapsibleUserPromptText({
   }, [text]);
 
   const padRight = reserveRightForRestore ? "pr-8" : "";
-  const basePClass = `break-words text-start text-xs font-normal leading-snug text-white/90 ${padRight}`;
+  /* Parent scroll area uses `text-balance`; override here so prompt lines use full width instead of “balanced” short lines. */
+  const basePClass = `w-full min-w-0 text-pretty break-words text-start text-xs font-normal leading-snug text-white/90 ${padRight}`;
 
   if (!needsCollapse) {
     return (
@@ -675,14 +692,12 @@ const Messages = () => {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
-  /* Restore UI disabled — re-enable with button + handler below
   const [restoringMessageId, setRestoringMessageId] = useState<string | null>(
     null,
   );
   const [restoredMessageIds, setRestoredMessageIds] = useState<Set<string>>(
     new Set(),
   );
-  */
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -1061,9 +1076,119 @@ const Messages = () => {
     }
   };
 
-  /* Restore handler — pair with state + button when re-enabling
-  const handleRestoreCode = async (messageId: string) => { ... };
-  */
+  // Function to restore code from CloudFront URL
+  const handleRestoreCode = async (messageId: string) => {
+    if (!API) {
+      console.error("API URL is not configured");
+      return;
+    }
+
+    if (!session?.user?.email) {
+      console.error("User email not found");
+      return;
+    }
+
+    const generatedName = getProjectIdFromPath();
+    if (!generatedName) {
+      console.error("Project ID not found");
+      return;
+    }
+
+    // Use the original _id if available, otherwise fall back to id
+    const messageToSend = messageId;
+
+    if (!messageToSend) {
+      console.error("Message ID is required");
+      return;
+    }
+
+    try {
+      setRestoringMessageId(messageId);
+
+      const response = await fetch(`${API}/restore`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messageId: messageToSend,
+          owner: session.user.email,
+          projectId: generatedName,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to restore code");
+      }
+
+      const data = await response.json();
+
+      // If restore was successful, fetch and apply the code
+      if (data.success && data.codeUrl) {
+        try {
+          // Persist effective snapshot URL in Redux so refresh hydration uses restored checkpoint.
+          dispatch(setUrl(data.codeUrl));
+
+          const codeData = await fetchProjectSnapshot({
+            projectId: generatedName,
+            userEmail: session.user.email,
+            codeUrl: data.codeUrl,
+          });
+          const fileWrites = dedupeFileWrites(
+            extractFileWritesFromSnapshot(codeData),
+          );
+
+          if (!fileWrites.length) {
+            console.error(
+              "[restore] Snapshot contained no extractable file writes",
+              { codeDataKeys: codeData && typeof codeData === "object" ? Object.keys(codeData as object) : [] },
+            );
+            dispatch(setStreamActive(false));
+            dispatch(refreshPreview());
+            throw new Error("Restored snapshot had no files to apply.");
+          }
+
+          // Replace local project state with the checkpoint (merge would leave stale paths).
+          dispatch(clearAllFiles());
+          dispatch(
+            updateSpecificFilesBatch(
+              fileWrites.map((w) => ({
+                filePath: w.path,
+                content: w.content,
+                createDirectories: true,
+              })),
+            ),
+          );
+
+          dispatch(setStreamActive(false));
+
+          // Mark this message as successfully restored
+          setRestoredMessageIds((prev) => new Set(prev).add(messageId));
+
+          // Refresh the preview to show the restored code
+          // Increment refresh counter to force iframe reload (changes iframe key)
+          dispatch(refreshPreview());
+          // Clear the refreshing state after a delay (refreshPreview sets it to true)
+          setTimeout(() => {
+            // dispatch(setIsRefreshing(false));
+          }, 1500);
+        } catch (fetchError) {
+          console.error("Error fetching or applying code:", fetchError);
+          throw new Error(
+            `Failed to fetch code: ${
+              fetchError instanceof Error ? fetchError.message : "Unknown error"
+            }`,
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Error restoring code:", error);
+      // Optionally show an error notification
+    } finally {
+      setRestoringMessageId(null);
+    }
+  };
 
   return (
     <div
@@ -1659,7 +1784,7 @@ const Messages = () => {
 
                   return (
                     <div className="relative z-[2] w-full bg-[#0F0F0F] py-2">
-                      <div className="mx-auto w-full max-w-lg px-1">
+                      <div className="mx-auto w-full max-w-full px-1">
                         <div className="overflow-hidden rounded-xl border border-[#2e2e32] bg-[#1A1A1C] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
                           {(userDisplayText ||
                             codeInfo?.id ||
@@ -1677,10 +1802,44 @@ const Messages = () => {
                               {userDisplayText ? (
                                 <CollapsibleUserPromptText
                                   text={userDisplayText}
-                                  reserveRightForRestore={false}
+                                  reserveRightForRestore={!!codeInfo?.id}
                                 />
                               ) : null}
-                              {/* Restore-to-checkpoint button: disabled — re-enable with state/handler block marked "Restore UI disabled" */}
+                              {codeInfo?.id ? (
+                                <button
+                                  type="button"
+                                  title={
+                                    restoredMessageIds.has(codeInfo.id)
+                                      ? "Restored"
+                                      : "Restore project to this point"
+                                  }
+                                  onClick={() =>
+                                    handleRestoreCode(codeInfo.id)
+                                  }
+                                  disabled={
+                                    restoringMessageId === codeInfo.id ||
+                                    restoredMessageIds.has(codeInfo.id)
+                                  }
+                                  className="absolute bottom-2 right-2 z-[2] rounded-md p-0.5 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  {restoringMessageId === codeInfo.id ? (
+                                    <LuLoaderCircle
+                                      className="h-3 w-3 shrink-0 animate-spin"
+                                      strokeWidth={2.25}
+                                    />
+                                  ) : restoredMessageIds.has(codeInfo.id) ? (
+                                    <LuCheck
+                                      className="h-3 w-3 shrink-0 text-zinc-500"
+                                      strokeWidth={2.25}
+                                    />
+                                  ) : (
+                                    <LuCornerUpLeft
+                                      className="h-3 w-3 shrink-0"
+                                      strokeWidth={2.25}
+                                    />
+                                  )}
+                                </button>
+                              ) : null}
                             </div>
                           )}
                           <div
@@ -2278,45 +2437,15 @@ const Messages = () => {
       {/* Show empty state only when not loading and no messages */}
       {!isInitialLoading &&
       !messagesLoading &&
-      (!messages ||
-        (messages.filter(
-          (msg) =>
-            msg.toolResult?.UsedTool !== "code_write" &&
-            msg.toolResult?.UsedTool !== "code_read" &&
-            msg.toolResult?.UsedTool !== "webfetch" &&
-            !isGithubTool(msg.toolResult?.UsedTool) &&
-            msg.toolResult?.UsedTool !== "WebScreenShotAndReadWebsiteTool" &&
-            (msg as any).usedTool !== "WebScreenShotAndReadWebsiteTool" &&
-            msg.toolResult?.UsedTool !== "get_project_attachment" &&
-            msg.toolResult?.UsedTool !== "issue_write" &&
-            msg.toolResult?.UsedTool !== "generate_image" &&
-            !(msg.content && /Executed/i.test(msg.content)) &&
-            !(
-              msg.toolResult?.UsedTool &&
-              msg.toolResult?.result?.success === false &&
-              (msg.toolResult?.result as any)?.error?.includes("not found")
-            ),
-        ).length === 0 &&
-          !messages.some(
-            (msg) =>
-              msg.toolResult?.UsedTool === "code_write" ||
-              msg.toolResult?.UsedTool === "code_read" ||
-              msg.toolResult?.UsedTool === "webfetch" ||
-              msg.toolResult?.UsedTool === "todo_read" ||
-              isGithubTool(msg.toolResult?.UsedTool) ||
-              msg.toolResult?.UsedTool === "WebScreenShotAndReadWebsiteTool" ||
-              (msg as any).usedTool === "WebScreenShotAndReadWebsiteTool" ||
-              msg.toolResult?.UsedTool === "get_project_attachment" ||
-              msg.toolResult?.UsedTool === "issue_write" ||
-              msg.toolResult?.UsedTool === "generate_image" ||
-              (msg.toolResult?.UsedTool &&
-                msg.toolResult?.result?.success === false &&
-                (msg.toolResult?.result as any)?.error?.includes("not found")),
-          ))) ? (
-        <div
-          className={`w-full h-full flex justify-center items-center flex-col space-y-2 text-lg font-medium text-white`}
-        >
-          <LuLoaderCircle className="animate-spin text-white" size={24} />
+      !isStreamActive &&
+      (!messages || messages.length === 0) ? (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-center">
+          <p className="text-sm font-medium text-white/60">
+            Say hi to the agent
+          </p>
+          <p className="text-xs text-white/35">
+            Ask the agent to change anything
+          </p>
         </div>
       ) : null}
     </div>

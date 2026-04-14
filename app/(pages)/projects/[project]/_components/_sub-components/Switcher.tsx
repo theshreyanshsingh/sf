@@ -13,6 +13,8 @@ const Switcher = () => {
     (state: RootState) => state.projectOptions
   );
   const isMobilePreviewRuntime = previewRuntime === "mobile";
+  const canChangeWorkspaceMode =
+    generationSuccess === "success" || generationSuccess === "thinking";
 
   const allOptions = [
     { id: "edit", icon: "Preview", label: "Edit" },
@@ -77,7 +79,7 @@ const Switcher = () => {
           <React.Fragment key={option.id}>
             <button
               onClick={() => {
-                if (generationSuccess === "success") {
+                if (canChangeWorkspaceMode) {
                   handleMode(option.id as "edit" | "split" | "code" | "pages");
                 }
               }}
@@ -101,7 +103,7 @@ const Switcher = () => {
           <React.Fragment key={index}>
             <button
               onClick={() => {
-                if (generationSuccess === "success") {
+                if (canChangeWorkspaceMode) {
                   handleMode(option.id as "edit" | "code" | "split" | "pages");
                 }
               }}

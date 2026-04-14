@@ -94,6 +94,7 @@ const WebRuntimeManager = () => {
     lastQueuedSyncSignatureRef.current = "";
     lastCompletedSyncSignatureRef.current = "";
     syncSequenceRef.current = Promise.resolve();
+    lastSyncedFileKeysRef.current = [];
     leadWithShellExitNextBootRef.current = false;
 
     const interrupt = window.terminalInterrupt;
@@ -314,9 +315,10 @@ const WebRuntimeManager = () => {
         const withBridge = await mergePreviewBridgeScripts(
           normalizedProjectFiles,
         );
-        // Restore requires deletions, but `syncFiles` is additive-only.
-        // Delete any paths that were previously synced but are no longer present.
         const prevKeys = lastSyncedFileKeysRef.current;
+        if (prevKeys.length === 0) {
+          await fetchAndMountTestFiles();
+        }
         if (prevKeys.length > 0) {
           const nextKeysSet = new Set(Object.keys(withBridge));
           const removed = prevKeys.filter((key) => !nextKeysSet.has(key));

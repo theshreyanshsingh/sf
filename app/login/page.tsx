@@ -63,6 +63,18 @@ const HeroSection: FC = () => {
 
       if (result?.ok) {
         const projectId = sessionStorage.getItem("projectId");
+        const params =
+          typeof window !== "undefined"
+            ? new URLSearchParams(window.location.search)
+            : null;
+        const callbackUrl = params?.get("callbackUrl");
+        const safeCallback =
+          callbackUrl &&
+          (callbackUrl.startsWith("/projects") ||
+            callbackUrl.startsWith("/workspace")) &&
+          !callbackUrl.startsWith("//")
+            ? callbackUrl
+            : null;
 
         unstable_batchedUpdates(() => {
           setStep(1);
@@ -70,7 +82,9 @@ const HeroSection: FC = () => {
           setEmail("");
         });
 
-        if (projectId) {
+        if (safeCallback) {
+          router.push(safeCallback);
+        } else if (projectId) {
           router.push(`/projects/${projectId}`);
         } else {
           router.push("/");

@@ -4,6 +4,19 @@ import { signIn } from "next-auth/react";
 import { API } from "../config/publicEnv";
 
 const getSignInCallbackUrl = (): string => {
+  if (typeof window !== "undefined") {
+    const fromQuery = new URLSearchParams(window.location.search).get(
+      "callbackUrl",
+    );
+    if (
+      fromQuery &&
+      (fromQuery.startsWith("/projects") ||
+        fromQuery.startsWith("/workspace")) &&
+      !fromQuery.startsWith("//")
+    ) {
+      return fromQuery;
+    }
+  }
   const projectId = sessionStorage.getItem("projectId");
   if (projectId) {
     return `/projects/${projectId}`;

@@ -543,6 +543,10 @@ const MobilePreviewSnack = () => {
       );
       dispatch(updatePreviewSnackDependencies(dependencyUpdates));
     }
+
+    if (isBootstrapState) {
+      setSnackBootNonce((n) => n + 1);
+    }
   }, [
     dispatch,
     previewRuntime,
@@ -779,7 +783,7 @@ const MobilePreviewSnack = () => {
     if (hasUpdates(updates)) {
       setIsRefreshing(true);
       snack.updateFiles(updates);
-      snack.sendCodeChanges();
+      sendCodeChangesAfterPendingOperations(snack);
     }
 
     previousFilesRef.current = sanitizedFiles;

@@ -1,6 +1,10 @@
 "use client";
 
-import { PREVIEW_SDK_54_CORE_DEPENDENCIES } from "@/default/mobile";
+import {
+  MOBILE_SNACK_BLOCKED_DEPENDENCIES,
+  PREVIEW_SDK_54_CORE_DEPENDENCIES,
+  isValidNpmPackageNameForSnack,
+} from "@/default/mobile";
 import type { PreviewRuntime } from "@/default/mobile";
 
 type RawFileWrite = {
@@ -20,8 +24,6 @@ const IMPORT_EXPORT_SPECIFIER_REGEX =
 const REQUIRE_SPECIFIER_REGEX = /(require\s*\(\s*)(["'])([^"']+)\2(\s*\))/g;
 const DYNAMIC_IMPORT_SPECIFIER_REGEX =
   /(import\s*\(\s*)(["'])([^"']+)\2(\s*\))/g;
-const FALLBACK_PACKAGE_LITERAL_REGEX = /(["'`])([^"'`\r\n]+)\1/g;
-
 const BUILTIN_MODULES = new Set<string>([
   "assert",
   "buffer",
@@ -91,6 +93,31 @@ const WEB_DEPENDENCY_NAMES = new Set<string>([
   "svelte",
   "@sveltejs/kit",
 ]);
+const KNOWN_PEER_DEPENDENCIES: Record<string, Record<string, string>> = {
+  "@react-navigation/native": {
+    "react-native-screens": "~4.10.0",
+    "react-native-safe-area-context": "~5.4.0",
+  },
+  "@react-navigation/stack": {
+    "react-native-gesture-handler": "~2.24.0",
+    "@react-native-masked-view/masked-view": "~0.3.2",
+  },
+  "@react-navigation/drawer": {
+    "react-native-gesture-handler": "~2.24.0",
+    "react-native-reanimated": "~3.17.0",
+  },
+  "@react-navigation/bottom-tabs": {
+    "react-native-screens": "~4.10.0",
+    "react-native-safe-area-context": "~5.4.0",
+  },
+  "expo-camera": {
+    "expo-media-library": "*",
+  },
+  "expo-image-picker": {
+    "expo-media-library": "*",
+  },
+};
+
 const WRAPPED_CONTENT_KEYS = [
   "code",
   "content",
@@ -336,10 +363,6 @@ const collectDependencySpecifiersFromSource = (content: string): Set<string> => 
   collectFromRegex(REQUIRE_SPECIFIER_REGEX, 3);
   collectFromRegex(DYNAMIC_IMPORT_SPECIFIER_REGEX, 3);
 
-  if (specifiers.size === 0) {
-    collectFromRegex(FALLBACK_PACKAGE_LITERAL_REGEX, 2);
-  }
-
   return specifiers;
 };
 
@@ -367,9 +390,9 @@ const parsePackageJsonDependencies = (
     const parsed = JSON.parse(content);
     if (!isObject(parsed)) return {};
 
-    const nextDependencies = isObject(parsed.dependencies)
-      ? parsed.dependencies
-      : {};
+    const devDeps = isObject(parsed.devDependencies) ? parsed.devDependencies : {};
+    const deps = isObject(parsed.dependencies) ? parsed.dependencies : {};
+    const nextDependencies = { ...devDeps, ...deps };
 
     const updates: Record<string, string | null> = {};
     Object.keys(PREVIEW_SDK_54_CORE_DEPENDENCIES).forEach((name) => {
@@ -384,6 +407,8 @@ const parsePackageJsonDependencies = (
     Object.entries(nextDependencies).forEach(([name, value]) => {
       const normalizedName = normalizeDependencySpecifier(name);
       if (!normalizedName) return;
+      if (!isValidNpmPackageNameForSnack(normalizedName)) return;
+      if (MOBILE_SNACK_BLOCKED_DEPENDENCIES.has(normalizedName)) return;
       if (typeof value !== "string" || !value.trim()) return;
       updates[normalizedName] = value.trim();
     });
@@ -1023,6 +1048,8 @@ export const resolveDependencyUpdatesForWrites = ({
 
     if (!isLikelySourceFilePath(normalizedPath)) return;
     inferDependenciesFromSource(content).forEach((dependencyName) => {
+      if (!isValidNpmPackageNameForSnack(dependencyName)) return;
+      if (MOBILE_SNACK_BLOCKED_DEPENDENCIES.has(dependencyName)) return;
       if (normalizedCurrent[dependencyName]) return;
       if (updates[dependencyName] === undefined) {
         updates[dependencyName] = DEFAULT_AUTO_DEPENDENCY_VERSION;
@@ -1038,5 +1065,22 @@ export const resolveDependencyUpdatesForWrites = ({
     });
   }
 
-  return updates;
+  const expandedNames = new Set(Object.keys(updates));
+  for (const name of expandedNames) {
+    const peers = KNOWN_PEER_DEPENDENCIES[name];
+    if (!peers) continue;
+    for (const [peerName, peerVersion] of Object.entries(peers)) {
+      if (updates[peerName] !== undefined) continue;
+      if (normalizedCurrent[peerName]) continue;
+      updates[peerName] = peerVersion;
+    }
+  }
+
+  const sanitized: Record<string, string | null> = {};
+  Object.entries(updates).forEach(([name, version]) => {
+    if (!isValidNpmPackageNameForSnack(name)) return;
+    if (MOBILE_SNACK_BLOCKED_DEPENDENCIES.has(name)) return;
+    sanitized[name] = version;
+  });
+  return sanitized;
 };

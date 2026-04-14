@@ -150,7 +150,7 @@ const PricingModal: React.FC = () => {
                 Scale
               </h3>
               <p className="text-[#b1b1b1] text-sm font-sans leading-snug px-1">
-                100 messages per month for teams ready to ship faster
+                100 messages per month for users ready to ship faster
               </p>
             </div>
 
@@ -193,30 +193,6 @@ const PricingModal: React.FC = () => {
                     </p>
                     <p className="text-[#8C8C8C] text-xs">
                       Resets monthly
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2.5 py-2 px-2.5 bg-[#1c1c1d] rounded-lg border border-[#2a2a2b]">
-                  <div className="w-7 h-7 bg-[#4a90e2] rounded-full flex items-center justify-center flex-shrink-0">
-                    <svg
-                      className="w-3.5 h-3.5 text-white"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="text-white font-medium text-sm">
-                      Scale-only quota
-                    </p>
-                    <p className="text-[#8C8C8C] text-xs">
-                      Free stays at 5 prompts
                     </p>
                   </div>
                 </div>

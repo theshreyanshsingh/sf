@@ -10,7 +10,6 @@ import SubHeader from "./SubHeader";
 // import Header from "./Header";
 import { usePathname } from "next/navigation";
 import EnhancedPrompt from "./_sub-components/EnhancedPrompt";
-import Thoughts from "./_sub-components/Thoughts";
 import CodeEditor from "./v1/Editor/CodeEditor";
 import Preview from "./v1/Preview";
 import MobilePreviewSnack from "./mobile/MobilePreviewSnack";
@@ -38,8 +37,7 @@ const Sheet: NextPage = () => {
   } = useSelector((state: RootState) => state.projectOptions);
   const isMobilePreviewRuntime = previewRuntime === "mobile";
   const showWebWorkspaceShell =
-    !isMobilePreviewRuntime &&
-    (generationSuccess === "success" || generationSuccess === "thinking");
+    generationSuccess === "success" || generationSuccess === "thinking";
 
   const { data: projectData, currentFile } = useSelector(
     (state: RootState) => state.projectFiles,
@@ -459,19 +457,6 @@ const Sheet: NextPage = () => {
                 )}
               </div>
             </div>
-          </motion.div>
-        )}
-
-        {!showWebWorkspaceShell && generationSuccess === "thinking" && (
-          <motion.div
-            key="thinking"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="justify-center items-center flex max-md:h-[90vh] h-full w-full flex-col space-y-3"
-          >
-            <Thoughts />
           </motion.div>
         )}
 

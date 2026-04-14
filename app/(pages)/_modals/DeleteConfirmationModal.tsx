@@ -9,16 +9,26 @@ import { setNotification } from "@/app/redux/reducers/NotificationModalReducer";
 import { deleteProject } from "@/app/redux/reducers/basicData";
 import { updateProject } from "@/app/_services/projects";
 
+type UpdateProjectResult = Awaited<ReturnType<typeof updateProject>>;
+
 interface DeleteConfirmationModalProps {
   isOpen: boolean;
   onClose: () => void;
   projectId: string;
+  /** When set, removes one template version instead of deleting the whole project. */
+  mode?: "project" | "templateVersion";
+  templateVersionSlug?: string;
+  /** For template removal, receives the API result so callers can sync local state. */
+  onDeleted?: (result?: UpdateProjectResult) => void;
 }
 
 const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
   isOpen,
   onClose,
   projectId,
+  mode = "project",
+  templateVersionSlug,
+  onDeleted,
 }) => {
   const [confirmationText, setConfirmationText] = useState("");
   const dispatch = useDispatch();
@@ -40,10 +50,66 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
       return;
     }
 
+    if (mode === "templateVersion") {
+      const slug = templateVersionSlug?.trim();
+      if (!slug) {
+        dispatch(
+          setNotification({
+            modalOpen: true,
+            status: "error",
+            text: "Missing template to remove.",
+          }),
+        );
+        return;
+      }
+      try {
+        const res = await updateProject({
+          projectId,
+          action: "delete-template-version",
+          email: resolvedEmail,
+          currentSlug: slug,
+        });
+        if (!res.success) {
+          dispatch(
+            setNotification({
+              modalOpen: true,
+              status: "error",
+              text:
+                typeof res.message === "string"
+                  ? res.message
+                  : "Could not remove template.",
+            }),
+          );
+          return;
+        }
+        setConfirmationText("");
+        onClose();
+        onDeleted?.(res);
+        dispatch(
+          setNotification({
+            modalOpen: true,
+            status: "success",
+            text: "Template removed.",
+          }),
+        );
+      } catch (error) {
+        console.log(error);
+        dispatch(
+          setNotification({
+            modalOpen: true,
+            status: "error",
+            text: "Could not remove template.",
+          }),
+        );
+      }
+      return;
+    }
+
     try {
       await updateProject({ projectId, action: "delete", email: resolvedEmail });
       dispatch(deleteProject({ projectId }));
 
+      setConfirmationText("");
       onClose();
       dispatch(
         setNotification({
@@ -73,7 +139,7 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
             animate={{ opacity: 0.5 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.1 }}
-            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50"
+            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[200]"
             onClick={onClose}
           />
           <motion.div
@@ -81,15 +147,25 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -10 }}
             transition={{ duration: 0.1, ease: "easeOut" }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-sm bg-[#121212] rounded-md shadow-lg p-3"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[201] w-full max-w-sm bg-[#121212] rounded-md shadow-lg p-3"
           >
             <h3 className="text-sm font-medium text-white mb-4">
               Confirm Deletion
             </h3>
             <p className="text-xs font-sans font-medium text-gray-300 mb-4">
-              This action is irreversible. Type{" "}
-              <span className="text-red-500">&quot;delete&quot;</span> to
-              confirm.
+              {mode === "templateVersion" ? (
+                <>
+                  This removes this template URL from your account. Type{" "}
+                  <span className="text-red-500">&quot;delete&quot;</span> to
+                  confirm.
+                </>
+              ) : (
+                <>
+                  This action is irreversible. Type{" "}
+                  <span className="text-red-500">&quot;delete&quot;</span> to
+                  confirm.
+                </>
+              )}
             </p>
             <form onSubmit={handleSubmit}>
               <input

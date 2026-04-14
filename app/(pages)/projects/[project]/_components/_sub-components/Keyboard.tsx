@@ -51,14 +51,14 @@ const Keyboard: NextPage = () => {
   const { email } = useAuthenticated();
   const [attachments, setAttachments] = useState<AttachmentType[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const allowedModels = new Set(["claude-opus-4.6", "claude-sonnet-4.5"]);
+  const allowedModels = new Set(["claude-opus-4.6", "claude-sonnet-4.6"]);
   const [selectedModel, setSelectedModel] = useState(() => {
     if (typeof window !== "undefined") {
       const stored = sessionStorage.getItem("model");
       if (stored && allowedModels.has(stored)) return stored;
-      return "claude-sonnet-4.5";
+      return "claude-sonnet-4.6";
     }
-    return "claude-sonnet-4.5";
+    return "claude-sonnet-4.6";
   });
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
@@ -87,7 +87,7 @@ const Keyboard: NextPage = () => {
 
   const modelOptions = [
     { name: "claude-opus-4.6", display: "Claude Opus 4.6", scale: false },
-    { name: "claude-sonnet-4.5", display: "Claude Sonnet 4.5", scale: false },
+    { name: "claude-sonnet-4.6", display: "Claude Sonnet 4.6", scale: false },
   ];
 
   useEffect(() => {

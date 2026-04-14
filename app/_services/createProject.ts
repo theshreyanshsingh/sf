@@ -20,6 +20,7 @@ interface CreateProjectPayload {
   startingPoint?: string | null;
   previewRuntime?: "web" | "mobile";
   platform?: "web" | "mobile";
+  isPublic?: boolean;
 }
 
 interface CreateProjectResponse {

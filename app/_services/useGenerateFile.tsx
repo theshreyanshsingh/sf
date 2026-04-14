@@ -113,7 +113,7 @@ export const useGenerateFile = () => {
     reader: ReadableStreamDefaultReader<Uint8Array>,
     decoder: TextDecoder,
   ) => {
-    const selectedModel = sessionStorage.getItem("model") || "claude-sonnet-4.5";
+    const selectedModel = sessionStorage.getItem("model") || "claude-sonnet-4.6";
     let rawContent = "";
     let displayBuffer = "";
     let isClaudeModel = selectedModel.toLowerCase().includes("claude");
@@ -489,7 +489,7 @@ export const useGenerateFile = () => {
     try {
       if (!email) return;
 
-      const selectedModel = sessionStorage.getItem("model") || "claude-sonnet-4.5";
+      const selectedModel = sessionStorage.getItem("model") || "claude-sonnet-4.6";
 
       const rawString = JSON.stringify({
         prompt: input,

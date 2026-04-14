@@ -1,41 +1,45 @@
 import React, { useState } from "react";
-import { LuPin } from "react-icons/lu";
 import { MdOutlineDelete } from "react-icons/md";
-import { AiOutlineDeploymentUnit } from "react-icons/ai";
 import { MdOutlineDriveFileRenameOutline } from "react-icons/md";
 import { motion } from "framer-motion";
 import { TbCircuitSwitchClosed } from "react-icons/tb";
+import { LuCopy } from "react-icons/lu";
 import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 import { useDispatch } from "react-redux";
-import { renameProject, setVisibility } from "@/app/redux/reducers/basicData";
+import {
+  fetchAllProjects,
+  renameProject,
+  setVisibility,
+} from "@/app/redux/reducers/basicData";
+import type { AppDispatch } from "@/app/redux/store";
 import RenameModal from "./RenameModal";
 import DeleteConfirmationModal from "./DeleteConfirmationModal";
-import { updateProject } from "@/app/_services/projects";
+import { remixProject, updateProject } from "@/app/_services/projects";
 
 interface ProjectOptionsModalProps {
   isOpen: boolean;
   onClose: () => void;
   position: { top: number; left: number };
-  onPin: (projectId: string) => void;
   projectId: string;
-  isPinned: boolean;
   isPublic?: boolean;
   name: string;
 }
+
 const ProjectOptionsModal: React.FC<ProjectOptionsModalProps> = ({
   isOpen,
   onClose,
   position,
-  onPin,
   projectId,
-  isPinned,
   isPublic,
   name,
 }) => {
-  const dispatch = useDispatch();
+  const dispatch = useDispatch<AppDispatch>();
+  const router = useRouter();
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [remixBusy, setRemixBusy] = useState(false);
   const { data: session } = useSession();
   const resolvedEmail =
     session?.user?.email ||
@@ -76,28 +80,39 @@ const ProjectOptionsModal: React.FC<ProjectOptionsModalProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -10 }}
             transition={{ duration: 0.1, ease: "easeOut" }}
-            className="fixed z-50 bg-[#121212] rounded-lg shadow-lg py-1 min-w-[150px]"
+            className="fixed z-50 bg-[#121212] rounded-md shadow-lg py-1 min-w-[190px]"
             style={{
               top: position.top,
               left: position.left - 120,
             }}
           >
             <motion.button
+              type="button"
+              disabled={remixBusy || !resolvedEmail}
               onClick={async () => {
-                await updateProject({
-                  projectId,
-                  action: "pin",
-                  value: !isPinned,
-                  email: resolvedEmail,
-                });
-                onPin(projectId);
+                if (!resolvedEmail || remixBusy) return;
+                setRemixBusy(true);
+                try {
+                  const result = await remixProject({
+                    sourceProjectId: projectId,
+                    email: resolvedEmail,
+                  });
+                  if (result.success && result.projectId) {
+                    onClose();
+                    void dispatch(fetchAllProjects({ email: resolvedEmail }));
+                    window.location.href = `/projects/${result.projectId}`;
+                  }
+                } finally {
+                  setRemixBusy(false);
+                }
               }}
-              className="w-full text-left px-3 py-1.5 text-xs text-white hover:bg-[#2A2A2A] transition-all duration-200 flex items-center gap-2"
+              className="w-full text-left px-3 py-1.5 text-xs text-white hover:bg-[#2A2A2A] transition-all duration-200 flex items-center gap-2 disabled:opacity-50"
             >
-              <LuPin className="text-sm" />
-              {isPinned ? "Unpin" : "Pin"}
+              <LuCopy className="text-sm" />
+              {remixBusy ? "Creating…" : "Use as template"}
             </motion.button>
             <motion.button
+              type="button"
               onClick={async () => {
                 await updateProject({
                   projectId,
@@ -106,6 +121,7 @@ const ProjectOptionsModal: React.FC<ProjectOptionsModalProps> = ({
                 });
                 dispatch(setVisibility({ projectId, isPublic: !isPublic }));
                 onClose();
+                void dispatch(fetchAllProjects({ email: resolvedEmail }));
               }}
               className="w-full text-left px-3 py-1.5 text-xs text-white hover:bg-[#2A2A2A] transition-all duration-200 flex items-center gap-2"
             >
@@ -121,14 +137,6 @@ const ProjectOptionsModal: React.FC<ProjectOptionsModalProps> = ({
             >
               <MdOutlineDriveFileRenameOutline className="text-sm" />
               Rename
-            </motion.button>
-            <motion.button
-              disabled
-              onClick={onClose}
-              className="w-full text-left px-3 py-1.5 text-xs text-white hover:bg-[#2A2A2A] transition-all duration-200 flex items-center gap-2"
-            >
-              <AiOutlineDeploymentUnit className="text-sm" />
-              Deploy {"(Available soon)"}
             </motion.button>
             <motion.button
               onClick={() => {

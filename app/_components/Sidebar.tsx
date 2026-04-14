@@ -52,7 +52,7 @@ const Sidebar = () => {
                 className="cursor-pointer hover:bg-[#2b2a2d] rounded-md p-1"
                 onClick={() => {
                   if (O.title === "Projects") {
-                    router.push("/projects");
+                    router.push("/workspace/list");
                     // dispatch(fetchAllProjects({ email: email.value || "" }));
                     // setActiveIndex(i);
                   } else {
@@ -81,7 +81,7 @@ const Sidebar = () => {
           {/* Id */}
           <motion.button
             onClick={() => {
-              router.push("/projects/settings");
+              window.location.href = "/workspace/profile";
             }}
             whileHover={{ scale: 1.1, filter: "brightness(1.3)" }}
             transition={{ duration: 0.2 }}
@@ -121,7 +121,7 @@ const Sidebar = () => {
               className=" cursor-pointer hover:bg-white hover:text-black p-2"
               onClick={() => {
                 if (O.title === "Projects") {
-                  router.push("/projects");
+                  router.push("/workspace/list");
                 } else {
                   router.push("/");
                 }
@@ -132,7 +132,7 @@ const Sidebar = () => {
           ))}
           <motion.button
             onClick={() => {
-              router.push("/projects/settings");
+              window.location.href = "/workspace/profile";
             }}
             whileHover={{ scale: 1.1, filter: "brightness(1.3)" }}
             transition={{ duration: 0.2 }}

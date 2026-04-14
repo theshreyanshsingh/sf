@@ -877,7 +877,7 @@ Update the React components NOW to preserve all formatting.`;
                   projectId, 
                   owner: email.value as string,
                   terminal: "", 
-                  model: sessionStorage.getItem("model") || "claude-sonnet-4.5",
+                  model: sessionStorage.getItem("model") || "claude-sonnet-4.6",
                   silent: false // Show AI is working so user knows it's updating
                 });
                 console.log(`🚀 [Preview] Triggered AI to update React source files - preserving formatting tags and styles`);

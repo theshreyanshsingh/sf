@@ -6,7 +6,7 @@ import { RiPlayCircleLine, RiRefreshLine, RiRestartLine } from "react-icons/ri";
 import { CiMobile1, CiLaptop } from "react-icons/ci";
 
 import { LuLayoutTemplate, LuMousePointer2 } from "react-icons/lu";
-import { TiPen } from "react-icons/ti";
+// import { TiPen } from "react-icons/ti";
 
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/app/redux/store";
@@ -14,9 +14,7 @@ import {
   refreshPreview,
   setResponsivess,
   setInspectorMode,
-  setEditMode,
   setShowTemplateBlocks,
-  setShowPreviewPageBar,
 } from "@/app/redux/reducers/projectOptions";
 
 // const dropdownVariants = {
@@ -30,7 +28,6 @@ const SubHeader: NextPage = () => {
     inspectorMode,
     editMode,
     showTemplateBlocks,
-    showPreviewPageBar,
     previewUrl,
     previewRuntime,
     isStreamActive,
@@ -104,6 +101,7 @@ const SubHeader: NextPage = () => {
               Inspector
             </button>
 
+            {/* Edit (WYSIWYG) — hidden per product request
             <button
               onClick={() => {
                 if (!previewChromeLocked) {
@@ -129,6 +127,7 @@ const SubHeader: NextPage = () => {
               <TiPen />
               Edit
             </button>
+            */}
 
             {editMode && (
               <button
@@ -161,6 +160,7 @@ const SubHeader: NextPage = () => {
 
       {/* Fullscreen & Device Toggle */}
       <div className="flex items-center space-x-4">
+        {/* Navigator — hidden per product request
         {!isMobilePreviewRuntime && (
           <button
             onClick={() =>
@@ -188,6 +188,7 @@ const SubHeader: NextPage = () => {
             Navigator
           </button>
         )}
+        */}
         {!isMobilePreviewRuntime && (
           <button
             type="button"

@@ -4,7 +4,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LuLoaderCircle } from "react-icons/lu";
 import { useAuthenticated } from "./useAuthenticated";
-const PROTECTED_ROUTES = [{ path: "/projects", type: "startsWith" }];
+const PROTECTED_ROUTES = [
+  { path: "/projects", type: "startsWith" },
+  { path: "/workspace", type: "startsWith" },
+];
 
 const RouteProtector: React.FC<{ children: React.ReactNode }> = ({
   children,

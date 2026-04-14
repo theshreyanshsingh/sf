@@ -10,8 +10,10 @@ import {
   DEFAULT_PREVIEW_SNACK_FILES,
   DEFAULT_PREVIEW_SNACK_NAME,
   DEFAULT_PREVIEW_SNACK_SDK_VERSION,
+  MOBILE_SNACK_BLOCKED_DEPENDENCIES,
   PREVIEW_SDK_54_CORE_DEPENDENCIES,
   inferPreviewRuntime,
+  isValidNpmPackageNameForSnack,
   type PreviewRuntime,
   type PreviewSnackDependencies,
   type PreviewSnackFiles,
@@ -72,21 +74,33 @@ const normalizeDependencyNameForState = (rawName: string): string | null => {
       packageName = packageName.replace(DEPENDENCY_EXTENSION_SUFFIX_REGEX, "");
     }
     if (!packageName) return null;
-    return `${parts[0]}/${packageName}`;
+    const scoped = `${parts[0]}/${packageName}`;
+    if (!isValidNpmPackageNameForSnack(scoped)) return null;
+    if (MOBILE_SNACK_BLOCKED_DEPENDENCIES.has(scoped)) return null;
+    return scoped;
   }
 
   let packageName = name.split("/")[0];
   if (DEPENDENCY_EXTENSION_SUFFIX_REGEX.test(packageName)) {
     packageName = packageName.replace(DEPENDENCY_EXTENSION_SUFFIX_REGEX, "");
   }
-  return packageName || null;
+  if (!packageName) return null;
+  if (!isValidNpmPackageNameForSnack(packageName)) return null;
+  if (MOBILE_SNACK_BLOCKED_DEPENDENCIES.has(packageName)) return null;
+  return packageName;
 };
 
 const enforcePreviewSdk54DependencyPins = (
   dependencies: PreviewSnackDependencies,
 ): PreviewSnackDependencies => {
+  const cleaned: PreviewSnackDependencies = {};
+  Object.entries(dependencies).forEach(([name, version]) => {
+    if (!isValidNpmPackageNameForSnack(name)) return;
+    if (MOBILE_SNACK_BLOCKED_DEPENDENCIES.has(name)) return;
+    cleaned[name] = version;
+  });
   return {
-    ...dependencies,
+    ...cleaned,
     ...PREVIEW_SDK_54_CORE_DEPENDENCIES,
   };
 };
@@ -119,6 +133,19 @@ export const fetchProject = createAsyncThunk<
     previewRuntime?: PreviewRuntime | null;
     siteMetaTitle?: string | null;
     siteFaviconUrl?: string | null;
+    about?: string | null;
+    templateSlug?: string | null;
+    templateCategory?: string | null;
+    templateVersions?: Array<{
+      slug: string;
+      category: string;
+      isPublic: boolean;
+      previewUrl?: string | null;
+      createdAt?: string | null;
+    }>;
+    isPublic?: boolean;
+    deployedUrl?: string | null;
+    deployedImage?: string | null;
   },
   FetchProjectParams
 >("projectOptions/fetchProject", async ({ string: requestBody }, thunkAPI) => {
@@ -154,11 +181,7 @@ export const fetchProject = createAsyncThunk<
             : inferPreviewRuntime(data.framework);
 
     if (!data.url) {
-      thunkAPI.dispatch(
-        setGenerationSuccess(
-          resolvedPreviewRuntime === "web" ? "thinking" : null,
-        ),
-      );
+      thunkAPI.dispatch(setGenerationSuccess("thinking"));
     }
 
     sessionStorage.setItem("framework", data.framework);
@@ -227,6 +250,57 @@ export const fetchProject = createAsyncThunk<
         data.siteFaviconUrl != null && typeof data.siteFaviconUrl === "string"
           ? data.siteFaviconUrl
           : null,
+      about:
+        data.about != null && typeof data.about === "string"
+          ? data.about
+          : null,
+      templateSlug:
+        data.templateSlug != null && typeof data.templateSlug === "string"
+          ? data.templateSlug
+          : null,
+      templateCategory:
+        data.templateCategory != null &&
+        typeof data.templateCategory === "string"
+          ? data.templateCategory
+          : null,
+      templateVersions: Array.isArray(data.templateVersions)
+        ? data.templateVersions
+            .filter(
+              (v: unknown) =>
+                v &&
+                typeof v === "object" &&
+                typeof (v as { slug?: unknown }).slug === "string",
+            )
+            .map(
+              (v: {
+                slug: string;
+                category?: string;
+                isPublic?: boolean;
+                previewUrl?: unknown;
+                createdAt?: unknown;
+              }) => ({
+                slug: v.slug,
+                category:
+                  typeof v.category === "string" ? v.category : "Landing Pages",
+                isPublic: v.isPublic !== false,
+                previewUrl:
+                  typeof v.previewUrl === "string" && v.previewUrl.trim()
+                    ? v.previewUrl.trim()
+                    : null,
+                createdAt:
+                  v.createdAt != null ? String(v.createdAt) : null,
+              }),
+            )
+        : [],
+      isPublic: typeof data.isPublic === "boolean" ? data.isPublic : true,
+      deployedUrl:
+        data.deployed_url != null && typeof data.deployed_url === "string"
+          ? data.deployed_url.trim() || null
+          : null,
+      deployedImage:
+        data.deployed_image != null && typeof data.deployed_image === "string"
+          ? data.deployed_image.trim() || null
+          : null,
     };
   } catch (error: unknown) {
     return thunkAPI.rejectWithValue(error);
@@ -290,6 +364,22 @@ interface PlanState {
   siteMetaTitle: string | null;
   /** HTTPS URL for the published favicon; null keeps the template default */
   siteFaviconUrl: string | null;
+  /** User-facing description; used for template cards when set. */
+  about: string | null;
+  templateSlug: string | null;
+  templateCategory: string | null;
+  templateVersions: Array<{
+    slug: string;
+    category: string;
+    isPublic: boolean;
+    previewUrl?: string | null;
+    createdAt?: string | null;
+  }>;
+  isPublic: boolean;
+  /** Live Netlify (or other) host — set after a successful publish. */
+  deployedUrl: string | null;
+  /** Thumbnail URL for gallery cards — set when deployed_url is set. */
+  deployedImage: string | null;
 }
 
 const buildInitialState = (): PlanState => ({
@@ -336,6 +426,13 @@ const buildInitialState = (): PlanState => ({
   urlLoadId: 0,
   siteMetaTitle: null,
   siteFaviconUrl: null,
+  about: null,
+  templateSlug: null,
+  templateCategory: null,
+  templateVersions: [],
+  isPublic: true,
+  deployedUrl: null,
+  deployedImage: null,
 });
 
 // Initial state is empty
@@ -714,6 +811,37 @@ const projectOptions = createSlice({
       state.siteMetaTitle = action.payload.siteMetaTitle;
       state.siteFaviconUrl = action.payload.siteFaviconUrl;
     },
+    patchProjectOptions: (
+      state,
+      action: PayloadAction<{
+        title?: string | null;
+        about?: string | null;
+        templateSlug?: string | null;
+        templateCategory?: string | null;
+        templateVersions?: Array<{
+          slug: string;
+          category: string;
+          isPublic: boolean;
+          previewUrl?: string | null;
+          createdAt?: string | null;
+        }>;
+        isPublic?: boolean;
+        deployedUrl?: string | null;
+        deployedImage?: string | null;
+      }>,
+    ) => {
+      const p = action.payload;
+      if (p.title !== undefined) state.title = p.title;
+      if (p.about !== undefined) state.about = p.about;
+      if (p.templateSlug !== undefined) state.templateSlug = p.templateSlug;
+      if (p.templateCategory !== undefined)
+        state.templateCategory = p.templateCategory;
+      if (p.templateVersions !== undefined)
+        state.templateVersions = p.templateVersions;
+      if (typeof p.isPublic === "boolean") state.isPublic = p.isPublic;
+      if (p.deployedUrl !== undefined) state.deployedUrl = p.deployedUrl;
+      if (p.deployedImage !== undefined) state.deployedImage = p.deployedImage;
+    },
     resetProjectOptions: () => buildInitialState(),
   },
   extraReducers: (builder) => {
@@ -743,6 +871,19 @@ const projectOptions = createSlice({
           previewRuntime?: PreviewRuntime | null;
           siteMetaTitle?: string | null;
           siteFaviconUrl?: string | null;
+          about?: string | null;
+          templateSlug?: string | null;
+          templateCategory?: string | null;
+          templateVersions?: Array<{
+            slug: string;
+            category: string;
+            isPublic: boolean;
+            previewUrl?: string | null;
+            createdAt?: string | null;
+          }>;
+          isPublic?: boolean;
+          deployedUrl?: string | null;
+          deployedImage?: string | null;
         }>
       ) => {
         state.url = null;
@@ -788,6 +929,37 @@ const projectOptions = createSlice({
           typeof action.payload.siteFaviconUrl === "string"
             ? action.payload.siteFaviconUrl
             : null;
+        state.about =
+          action.payload.about != null && typeof action.payload.about === "string"
+            ? action.payload.about
+            : null;
+        state.templateSlug =
+          action.payload.templateSlug != null &&
+          typeof action.payload.templateSlug === "string"
+            ? action.payload.templateSlug
+            : null;
+        state.templateCategory =
+          action.payload.templateCategory != null &&
+          typeof action.payload.templateCategory === "string"
+            ? action.payload.templateCategory
+            : null;
+        state.templateVersions = Array.isArray(action.payload.templateVersions)
+          ? action.payload.templateVersions
+          : [];
+        state.isPublic =
+          typeof action.payload.isPublic === "boolean"
+            ? action.payload.isPublic
+            : true;
+        state.deployedUrl =
+          action.payload.deployedUrl != null &&
+          typeof action.payload.deployedUrl === "string"
+            ? action.payload.deployedUrl.trim() || null
+            : null;
+        state.deployedImage =
+          action.payload.deployedImage != null &&
+          typeof action.payload.deployedImage === "string"
+            ? action.payload.deployedImage.trim() || null
+            : null;
       }
     );
     builder.addCase(fetchProject.rejected, (state) => {
@@ -832,6 +1004,7 @@ export const {
   updatePreviewSnackDependencies,
   resetPreviewSnackState,
   setSiteDeployMeta,
+  patchProjectOptions,
   resetProjectOptions,
 } = projectOptions.actions;
 export default projectOptions.reducer;
